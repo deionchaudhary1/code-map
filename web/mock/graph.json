@@ -1,0 +1,34 @@
+{
+  "root": "/mock/project",
+  "nodes": [
+    { "id": "src/index.ts", "extension": ".ts", "sizeBytes": 420, "exports": ["main"], "isEntryPoint": true, "folder": "src" },
+    { "id": "src/app.ts", "extension": ".ts", "sizeBytes": 2130, "exports": ["App"], "isEntryPoint": false, "folder": "src" },
+    { "id": "src/router.ts", "extension": ".ts", "sizeBytes": 1580, "exports": ["Router"], "isEntryPoint": false, "folder": "src" },
+    { "id": "src/utils/parse.ts", "extension": ".ts", "sizeBytes": 860, "exports": ["parse", "tokenize"], "isEntryPoint": false, "folder": "src" },
+    { "id": "src/utils/format.ts", "extension": ".ts", "sizeBytes": 310, "exports": ["format"], "isEntryPoint": false, "folder": "src" },
+    { "id": "src/models/user.ts", "extension": ".ts", "sizeBytes": 640, "exports": ["User", "createUser"], "isEntryPoint": false, "folder": "src" },
+    { "id": "src/models/session.ts", "extension": ".ts", "sizeBytes": 720, "exports": ["Session"], "isEntryPoint": false, "folder": "src" },
+    { "id": "web/App.tsx", "extension": ".tsx", "sizeBytes": 3400, "exports": ["default"], "isEntryPoint": true, "folder": "web" },
+    { "id": "web/hooks.ts", "extension": ".ts", "sizeBytes": 980, "exports": ["useGraph"], "isEntryPoint": false, "folder": "web" },
+    { "id": "types.ts", "extension": ".ts", "sizeBytes": 1200, "exports": ["FileNode", "ImportEdge"], "isEntryPoint": false, "folder": "." }
+  ],
+  "edges": [
+    { "source": "src/index.ts", "target": "src/app.ts", "importedSymbols": ["App"], "isTypeOnly": false, "inCycle": false },
+    { "source": "src/app.ts", "target": "src/router.ts", "importedSymbols": ["Router"], "isTypeOnly": false, "inCycle": true },
+    { "source": "src/router.ts", "target": "src/app.ts", "importedSymbols": ["App"], "isTypeOnly": false, "inCycle": true },
+    { "source": "src/app.ts", "target": "src/utils/parse.ts", "importedSymbols": ["parse"], "isTypeOnly": false, "inCycle": false },
+    { "source": "src/app.ts", "target": "src/utils/format.ts", "importedSymbols": ["format"], "isTypeOnly": false, "inCycle": false },
+    { "source": "src/router.ts", "target": "src/models/session.ts", "importedSymbols": ["Session"], "isTypeOnly": true, "inCycle": false },
+    { "source": "src/models/session.ts", "target": "src/models/user.ts", "importedSymbols": ["User"], "isTypeOnly": false, "inCycle": false },
+    { "source": "src/models/user.ts", "target": "types.ts", "importedSymbols": ["FileNode"], "isTypeOnly": true, "inCycle": false },
+    { "source": "web/App.tsx", "target": "web/hooks.ts", "importedSymbols": ["useGraph"], "isTypeOnly": false, "inCycle": false },
+    { "source": "web/hooks.ts", "target": "types.ts", "importedSymbols": ["ImportEdge"], "isTypeOnly": true, "inCycle": false }
+  ],
+  "cycles": [["src/router.ts", "src/app.ts"]],
+  "stats": {
+    "fileCount": 10,
+    "edgeCount": 10,
+    "cycleCount": 1,
+    "skippedFiles": 0
+  }
+}
