@@ -1,9 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import { Project, SyntaxKind, type SourceFile } from "ts-morph";
-import type { FileGraph, FileNode, ImportEdge } from "../types.js";
+import type { FileGraph, FileNode, ImportEdge, RouteDefinition } from "../types.js";
 import { walkSourceFiles, SOURCE_EXTENSIONS } from "./walk.js";
 import { tarjanSCC } from "./scc.js";
+import { collectRoutes } from "./routes.js";
+import { collectApiCalls, resolveApiCalls } from "./apiCalls.js";
 
 function toFileId(rootDir: string, absolutePath: string): string {
   return path.relative(rootDir, absolutePath).split(path.sep).join("/");
@@ -162,6 +164,8 @@ export function buildFileGraph(rootDir: string): FileGraph {
 
   const nodes: FileNode[] = [];
   const rawEdges: RawEdge[] = [];
+  const routes: RouteDefinition[] = [];
+  const detectedCalls: Array<ReturnType<typeof collectApiCalls>[number] & { source: string }> = [];
 
   for (const filePath of filePaths) {
     const sourceFile = sourceFiles.get(filePath);
@@ -196,6 +200,20 @@ export function buildFileGraph(rootDir: string): FileGraph {
     } catch {
       // if edge collection throws for this file, treat as no edges from it
     }
+
+    try {
+      routes.push(...collectRoutes(sourceFile, fileId));
+    } catch {
+      // a file that fails route scanning simply contributes no routes
+    }
+
+    try {
+      for (const call of collectApiCalls(sourceFile)) {
+        detectedCalls.push({ ...call, source: fileId });
+      }
+    } catch {
+      // a file that fails API-call scanning simply contributes no calls
+    }
   }
 
   const edges: ImportEdge[] = rawEdges.map((raw) => ({
@@ -226,16 +244,23 @@ export function buildFileGraph(rootDir: string): FileGraph {
     }
   }
 
+  const { apiCalls, endpoints } = resolveApiCalls(detectedCalls, routes);
+
   return {
     root: absoluteRoot,
     nodes,
     edges,
+    apiCalls,
+    endpoints,
+    routes,
     cycles,
     stats: {
       fileCount: nodes.length,
       edgeCount: edges.length,
       cycleCount: cycles.length,
       skippedFiles,
+      apiCallCount: apiCalls.length,
+      routeCount: routes.length,
     },
   };
 }

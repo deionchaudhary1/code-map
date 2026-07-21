@@ -1,4 +1,4 @@
-import type { FileGraph, SymbolGraph } from "./types";
+import type { ExplainResponse, ExplainTarget, FileGraph, SymbolGraph } from "./types";
 import mockGraph from "../mock/graph.json";
 
 export async function fetchFileGraph(): Promise<FileGraph> {
@@ -20,6 +20,19 @@ export async function fetchSymbolGraph(fileId: string): Promise<SymbolGraph> {
     throw new Error(body?.error ?? `GET /api/symbols failed: ${res.status}`);
   }
   return (await res.json()) as SymbolGraph;
+}
+
+export async function fetchExplanation(target: ExplainTarget): Promise<ExplainResponse> {
+  const res = await fetch("/api/explain", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(target),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(body?.error ?? `POST /api/explain failed: ${res.status}`);
+  }
+  return (await res.json()) as ExplainResponse;
 }
 
 export function humanFileSize(bytes: number): string {

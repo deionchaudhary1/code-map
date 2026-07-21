@@ -1,17 +1,43 @@
 import express from "express";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { FileGraph } from "./types.js";
+import type { ExplainTarget, FileGraph } from "./types.js";
 import { buildSymbolGraph } from "./analyzer/index.js";
+import { explain } from "./llm/explain.js";
+import { OllamaUnavailableError } from "./llm/ollama.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+export interface ServerOptions {
+  /** When false, /api/explain responds 503 without contacting Ollama. */
+  aiEnabled: boolean;
+  ollamaModel: string;
+}
+
+function parseExplainTarget(body: unknown): ExplainTarget | undefined {
+  if (typeof body !== "object" || body === null) return undefined;
+  const b = body as Record<string, unknown>;
+
+  if (b.kind === "import" && typeof b.source === "string" && typeof b.target === "string") {
+    return { kind: "import", source: b.source, target: b.target };
+  }
+  if (b.kind === "apiCall" && typeof b.id === "string") {
+    return { kind: "apiCall", id: b.id };
+  }
+  if (b.kind === "node" && typeof b.id === "string") {
+    return { kind: "node", id: b.id };
+  }
+  return undefined;
+}
 
 export function startServer(
   rootDir: string,
   graph: FileGraph,
   port: number,
+  options: ServerOptions,
 ): Promise<string> {
   const app = express();
+  app.use(express.json({ limit: "1mb" }));
 
   app.get("/api/graph", (_req, res) => {
     res.json(graph);
@@ -30,6 +56,36 @@ export function startServer(
     try {
       res.json(buildSymbolGraph(rootDir, file));
     } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.post("/api/explain", async (req, res) => {
+    if (!options.aiEnabled) {
+      res.status(503).json({ error: "AI explanations are disabled (started with --no-ai)." });
+      return;
+    }
+
+    const target = parseExplainTarget(req.body);
+    if (!target) {
+      res.status(400).json({
+        error: 'body must be {kind:"import",source,target} | {kind:"apiCall",id} | {kind:"node",id}',
+      });
+      return;
+    }
+
+    try {
+      const result = await explain(graph, target, options.ollamaModel);
+      if ("error" in result) {
+        res.status(404).json(result);
+        return;
+      }
+      res.json(result);
+    } catch (err) {
+      if (err instanceof OllamaUnavailableError) {
+        res.status(503).json({ error: err.message });
+        return;
+      }
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
     }
   });

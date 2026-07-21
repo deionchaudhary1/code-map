@@ -21,6 +21,14 @@ export default function StatsOverlay({ stats, folders }: StatsOverlayProps) {
         <span>Cycles</span>
         <span>{stats.cycleCount}</span>
       </div>
+      <div className="stats-row">
+        <span>API calls</span>
+        <span>{stats.apiCallCount}</span>
+      </div>
+      <div className="stats-row">
+        <span>Routes</span>
+        <span>{stats.routeCount}</span>
+      </div>
       {stats.skippedFiles > 0 && (
         <div className="stats-row">
           <span>Skipped</span>
@@ -46,6 +54,14 @@ export default function StatsOverlay({ stats, folders }: StatsOverlayProps) {
         <div className="legend-item">
           <span className="legend-line cycle" />
           <span>in cycle</span>
+        </div>
+        <div className="legend-item">
+          <span className="legend-line api" />
+          <span>API call</span>
+        </div>
+        <div className="legend-item">
+          <span className="legend-swatch endpoint" />
+          <span>endpoint</span>
         </div>
       </div>
     </div>

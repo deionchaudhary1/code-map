@@ -158,6 +158,51 @@ body,
   border-color: #5b8dd6;
 }
 
+.side-panel button.expand-btn:disabled {
+  color: #7d7d7d;
+  cursor: default;
+}
+
+.side-panel button.expand-btn.explain:hover:not(:disabled) {
+  border-color: #e0883a;
+}
+
+.side-panel .mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  word-break: break-all;
+  text-align: right;
+}
+
+.explanation {
+  background: #1a1c20;
+  border: 1px solid #2a2d33;
+  border-left: 2px solid #e0883a;
+  border-radius: 4px;
+  padding: 10px;
+  line-height: 1.5;
+  color: #d8d8d8;
+  white-space: pre-wrap;
+}
+
+.explain-error {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border: 1px solid #5c2f2f;
+  border-radius: 4px;
+  background: #241a1a;
+  color: #e08a8a;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.side-panel .hint {
+  color: #8a8f98;
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 12px 0 0 0;
+}
+
 .symbol-list {
   margin-top: 12px;
   display: flex;
@@ -258,6 +303,17 @@ body,
 
 .legend-line.cycle {
   border-top-color: #d65b5b;
+}
+
+.legend-line.api {
+  border-top-color: #e0883a;
+  border-top-style: dashed;
+}
+
+.legend-swatch.endpoint {
+  border-radius: 5px;
+  background: #241d14;
+  border: 1px dashed #e0883a;
 }
 
 .empty-state {

@@ -26,11 +26,58 @@ export interface ImportEdge {
   inCycle: boolean;
 }
 
+export type HttpMethod = "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "unknown";
+
+/** An outbound HTTP call (fetch/axios) found in a source file. */
+export interface ApiCallEdge {
+  /** Stable id: "<source>::<method>::<url>" — used for selection and /api/explain */
+  id: string;
+  /** FileNode.id of the file making the call */
+  source: string;
+  method: HttpMethod;
+  /** Literal URL, with template placeholders normalized to ":param"; "<dynamic>" when unresolvable */
+  url: string;
+  /** True when the URL could not be read as a literal */
+  isDynamic: boolean;
+  client: "fetch" | "axios" | "other";
+  /** 1-indexed line of the call site in `source` */
+  line: number;
+  /**
+   * FileNode.id of the file registering the matching server route, when one was
+   * found; otherwise the id of the synthetic EndpointNode this call points at.
+   */
+  target: string;
+}
+
+/** A synthetic node for an HTTP endpoint that no in-repo route handler matched. */
+export interface EndpointNode {
+  /** "endpoint::<METHOD> <url>" — namespaced so it can never collide with a FileNode.id */
+  id: string;
+  method: HttpMethod;
+  url: string;
+}
+
+/** A server route registration (Express-style) found in the codebase. */
+export interface RouteDefinition {
+  /** FileNode.id of the file registering the route */
+  file: string;
+  method: HttpMethod;
+  /** Registered path, e.g. "/api/users/:id" */
+  path: string;
+  line: number;
+}
+
 export interface FileGraph {
   /** Absolute path of the analyzed project root */
   root: string;
   nodes: FileNode[];
   edges: ImportEdge[];
+  /** Outbound HTTP calls detected in the codebase */
+  apiCalls: ApiCallEdge[];
+  /** Synthetic nodes for endpoints with no matching in-repo route */
+  endpoints: EndpointNode[];
+  /** Server routes registered in the codebase (used to resolve apiCalls) */
+  routes: RouteDefinition[];
   /** Each cycle is a list of FileNode.ids forming a strongly connected component (length >= 2) */
   cycles: string[][];
   stats: {
@@ -38,6 +85,8 @@ export interface FileGraph {
     edgeCount: number;
     cycleCount: number;
     skippedFiles: number; // files that failed to parse
+    apiCallCount: number;
+    routeCount: number;
   };
 }
 
@@ -72,6 +121,21 @@ export interface SymbolGraph {
   edges: CallEdge[];
 }
 
+/** What the user asked to have explained. */
+export type ExplainTarget =
+  | { kind: "import"; source: string; target: string }
+  | { kind: "apiCall"; id: string }
+  | { kind: "node"; id: string };
+
+export interface ExplainResponse {
+  explanation: string;
+  model: string;
+  /** True when served from the server-side cache rather than a fresh generation */
+  cached: boolean;
+}
+
 // HTTP API contract served by the local server:
-//   GET /api/graph                     -> FileGraph
-//   GET /api/symbols?file=<FileNode.id> -> SymbolGraph  (404 { error } if unknown file)
+//   GET  /api/graph                     -> FileGraph
+//   GET  /api/symbols?file=<FileNode.id> -> SymbolGraph  (404 { error } if unknown file)
+//   POST /api/explain  body: ExplainTarget -> ExplainResponse
+//        (503 { error } when Ollama is unreachable; 404 { error } for unknown ids)

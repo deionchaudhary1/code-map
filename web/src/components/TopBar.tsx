@@ -9,6 +9,8 @@ interface TopBarProps {
   onToggleExtension: (extension: string) => void;
   cyclesOnly: boolean;
   onToggleCyclesOnly: () => void;
+  apiOnly: boolean;
+  onToggleApiOnly: () => void;
 }
 
 export default function TopBar({
@@ -22,6 +24,8 @@ export default function TopBar({
   onToggleExtension,
   cyclesOnly,
   onToggleCyclesOnly,
+  apiOnly,
+  onToggleApiOnly,
 }: TopBarProps) {
   return (
     <div className="top-bar">
@@ -65,6 +69,13 @@ export default function TopBar({
         onClick={onToggleCyclesOnly}
       >
         Cycles only
+      </button>
+
+      <button
+        className={`toggle-btn${apiOnly ? " active" : ""}`}
+        onClick={onToggleApiOnly}
+      >
+        API calls only
       </button>
     </div>
   );
