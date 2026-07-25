@@ -134,8 +134,51 @@ export interface ExplainResponse {
   cached: boolean;
 }
 
+/**
+ * Everything needed to generate an explanation, without generating it. Hosted
+ * mode returns this instead of an ExplainResponse: the server assembles the
+ * prompt (it has the source files) but the browser makes the Ollama call, since
+ * only the browser can reach the user's own machine.
+ */
+export interface ExplainContextResponse {
+  prompt: string;
+  system: string;
+  /** Stable per-target key, e.g. "import::a.ts::b.ts" — the client caches on it */
+  cacheKey: string;
+  /** Model the server suggests; the client may override it */
+  suggestedModel: string;
+}
+
+/**
+ * Which server the frontend is talking to. Fetched at startup so a single
+ * `web/dist` build works under both the local CLI server and the hosted server.
+ */
+export type AppConfig =
+  | { mode: "local"; aiEnabled: boolean; ollamaModel: string }
+  | { mode: "hosted"; ollamaModel: string; maxUploadBytes: number };
+
+/** Returned by the hosted server's ingestion routes. */
+export interface SessionResponse {
+  sessionId: string;
+  graph: FileGraph;
+}
+
 // HTTP API contract served by the local server:
+//   GET  /api/config                    -> AppConfig  ({ mode: "local", ... })
 //   GET  /api/graph                     -> FileGraph
 //   GET  /api/symbols?file=<FileNode.id> -> SymbolGraph  (404 { error } if unknown file)
 //   POST /api/explain  body: ExplainTarget -> ExplainResponse
 //        (503 { error } when Ollama is unreachable; 404 { error } for unknown ids)
+//
+// Additional contract served by the hosted server (src/hostedServer.ts). Session
+// routes mirror the local ones under a per-session prefix, so the frontend only
+// has to swap the prefix rather than branch per call:
+//   GET    /api/config                            -> AppConfig ({ mode: "hosted", ... })
+//   POST   /api/upload   body: raw zip bytes      -> SessionResponse
+//   POST   /api/clone    body: { url }            -> SessionResponse
+//   GET    /api/sessions/<id>/graph               -> FileGraph (root blanked)
+//   GET    /api/sessions/<id>/symbols?file=<id>   -> SymbolGraph
+//   POST   /api/sessions/<id>/explain-context     -> ExplainContextResponse
+//          body: ExplainTarget
+//   DELETE /api/sessions/<id>                     -> 204
+//        (404 { error } when the session is unknown or has expired)

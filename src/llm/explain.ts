@@ -3,7 +3,7 @@ import path from "node:path";
 import type { ExplainTarget, FileGraph } from "../types.js";
 import { generate } from "./ollama.js";
 
-const SYSTEM_PROMPT = [
+export const SYSTEM_PROMPT = [
   "You explain how parts of a software codebase connect to each other.",
   "You are given factual details extracted by a static analyzer, plus short code excerpts.",
   "Explain the connection in 2-4 sentences of plain English for a developer new to this codebase:",

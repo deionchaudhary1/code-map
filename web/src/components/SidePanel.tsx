@@ -1,14 +1,32 @@
 import { useState } from "react";
 import type { ExplainTarget, SymbolGraph } from "../types";
 import type { GraphLink, GraphNode } from "../graphModel";
-import { fetchExplanation, fetchSymbolGraph, humanFileSize } from "../api";
+import {
+  fetchExplainContext,
+  fetchExplanation,
+  fetchSymbolGraph,
+  humanFileSize,
+  type ApiPrefix,
+} from "../api";
+import { generate, OllamaError } from "../ollamaClient";
+import { useOllamaConfig } from "../OllamaConfigContext";
 
 interface SidePanelProps {
   node: GraphNode | null;
   link: GraphLink | null;
   incomingCount: number;
   outgoingCount: number;
+  prefix: ApiPrefix;
+  hosted: boolean;
+  onOpenSettings: () => void;
 }
+
+/**
+ * Hosted mode has no server-side explanation cache — the server never sees the
+ * generated text. Keyed the same way the server keys its own cache, using the
+ * cacheKey it hands back, so the two stay consistent.
+ */
+const explanationCache = new Map<string, string>();
 
 /** The thing currently selected, expressed as an /api/explain request body. */
 function explainTargetFor(node: GraphNode | null, link: GraphLink | null): ExplainTarget | null {
@@ -20,19 +38,54 @@ function explainTargetFor(node: GraphNode | null, link: GraphLink | null): Expla
   return null;
 }
 
-function ExplainSection({ target }: { target: ExplainTarget }) {
+function ExplainSection({
+  target,
+  prefix,
+  hosted,
+  onOpenSettings,
+}: {
+  target: ExplainTarget;
+  prefix: ApiPrefix;
+  hosted: boolean;
+  onOpenSettings: () => void;
+}) {
+  const { host, model } = useOllamaConfig();
   const [explanation, setExplanation] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showOriginHelp, setShowOriginHelp] = useState(false);
 
   async function handleExplain() {
     setLoading(true);
     setError(null);
+    setShowOriginHelp(false);
     try {
-      const result = await fetchExplanation(target);
-      setExplanation(result.explanation);
+      if (!hosted) {
+        const result = await fetchExplanation(prefix, target);
+        setExplanation(result.explanation);
+        return;
+      }
+
+      // Hosted: the server builds the prompt, this browser runs the model.
+      const context = await fetchExplainContext(prefix, target);
+      const cacheKey = `${model}::${context.cacheKey}`;
+      const hit = explanationCache.get(cacheKey);
+      if (hit) {
+        setExplanation(hit);
+        return;
+      }
+
+      const text = await generate({
+        host,
+        model,
+        prompt: context.prompt,
+        system: context.system,
+      });
+      explanationCache.set(cacheKey, text);
+      setExplanation(text);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to generate explanation");
+      if (err instanceof OllamaError && err.likelyCors) setShowOriginHelp(true);
     } finally {
       setLoading(false);
     }
@@ -46,6 +99,11 @@ function ExplainSection({ target }: { target: ExplainTarget }) {
         </button>
       )}
       {error && <div className="explain-error">{error}</div>}
+      {showOriginHelp && (
+        <button className="expand-btn" onClick={onOpenSettings}>
+          Check Ollama settings
+        </button>
+      )}
       {explanation && (
         <>
           <div className="section-label">Explanation</div>
@@ -145,10 +203,12 @@ function FileDetails({
   node,
   incomingCount,
   outgoingCount,
+  prefix,
 }: {
   node: Extract<GraphNode, { kind: "file" }>;
   incomingCount: number;
   outgoingCount: number;
+  prefix: ApiPrefix;
 }) {
   const [symbolGraph, setSymbolGraph] = useState<SymbolGraph | null>(null);
   const [loading, setLoading] = useState(false);
@@ -158,7 +218,7 @@ function FileDetails({
     setLoading(true);
     setError(null);
     try {
-      setSymbolGraph(await fetchSymbolGraph(node.id));
+      setSymbolGraph(await fetchSymbolGraph(prefix, node.id));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load symbols");
     } finally {
@@ -245,18 +305,38 @@ function FileDetails({
   );
 }
 
-export default function SidePanel({ node, link, incomingCount, outgoingCount }: SidePanelProps) {
+export default function SidePanel({
+  node,
+  link,
+  incomingCount,
+  outgoingCount,
+  prefix,
+  hosted,
+  onOpenSettings,
+}: SidePanelProps) {
   const explainTarget = explainTargetFor(node, link);
 
   return (
     <div className="side-panel">
       {link && <LinkDetails link={link} />}
       {!link && node?.kind === "file" && (
-        <FileDetails node={node} incomingCount={incomingCount} outgoingCount={outgoingCount} />
+        <FileDetails
+          node={node}
+          incomingCount={incomingCount}
+          outgoingCount={outgoingCount}
+          prefix={prefix}
+        />
       )}
       {!link && node?.kind === "endpoint" && <EndpointDetails node={node} />}
 
-      {explainTarget && <ExplainSection target={explainTarget} />}
+      {explainTarget && (
+        <ExplainSection
+          target={explainTarget}
+          prefix={prefix}
+          hosted={hosted}
+          onOpenSettings={onOpenSettings}
+        />
+      )}
     </div>
   );
 }

@@ -1,3 +1,5 @@
+import type { Direction } from "../layout/elk";
+
 interface TopBarProps {
   search: string;
   onSearchChange: (value: string) => void;
@@ -11,6 +13,14 @@ interface TopBarProps {
   onToggleCyclesOnly: () => void;
   apiOnly: boolean;
   onToggleApiOnly: () => void;
+  direction: Direction;
+  onToggleDirection: () => void;
+  uniformWidth: boolean;
+  onToggleUniformWidth: () => void;
+  /** Hosted mode adds the controls that only make sense with a session. */
+  hosted: boolean;
+  onOpenSettings: () => void;
+  onReset: () => void;
 }
 
 export default function TopBar({
@@ -26,6 +36,13 @@ export default function TopBar({
   onToggleCyclesOnly,
   apiOnly,
   onToggleApiOnly,
+  direction,
+  onToggleDirection,
+  uniformWidth,
+  onToggleUniformWidth,
+  hosted,
+  onOpenSettings,
+  onReset,
 }: TopBarProps) {
   return (
     <div className="top-bar">
@@ -77,6 +94,29 @@ export default function TopBar({
       >
         API calls only
       </button>
+
+      <button className="toggle-btn" onClick={onToggleDirection} title="Layout direction">
+        {direction === "DOWN" ? "↓ Top-down" : "→ Left-right"}
+      </button>
+
+      <button
+        className={`toggle-btn${uniformWidth ? " active" : ""}`}
+        onClick={onToggleUniformWidth}
+        title="Give every box the same width"
+      >
+        Uniform width
+      </button>
+
+      {hosted && (
+        <div className="top-bar-right">
+          <button className="toggle-btn" onClick={onOpenSettings} title="Configure Ollama">
+            AI settings
+          </button>
+          <button className="toggle-btn" onClick={onReset} title="Analyze a different project">
+            New project
+          </button>
+        </div>
+      )}
     </div>
   );
 }

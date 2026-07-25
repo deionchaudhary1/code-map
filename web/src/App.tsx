@@ -1,13 +1,27 @@
 import { useEffect, useMemo, useState } from "react";
-import type { FileGraph } from "./types";
-import { fetchFileGraph } from "./api";
+import type { AppConfig, FileGraph, SessionResponse } from "./types";
+import {
+  fetchConfig,
+  fetchFileGraphOrMock,
+  sessionPrefix,
+  LOCAL_PREFIX,
+  type ApiPrefix,
+} from "./api";
 import { toGraphLinks, toGraphNodes, type GraphLink, type GraphNode } from "./graphModel";
 import TopBar from "./components/TopBar";
 import StatsOverlay from "./components/StatsOverlay";
 import SidePanel from "./components/SidePanel";
 import GraphCanvas from "./components/GraphCanvas";
+import UploadScreen from "./components/UploadScreen";
+import OllamaSettings from "./components/OllamaSettings";
+import { OllamaConfigProvider } from "./OllamaConfigContext";
+import { useLayout } from "./layout/useLayout";
+import type { Direction } from "./layout/elk";
 
 export default function App() {
+  const [config, setConfig] = useState<AppConfig | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
   const [graph, setGraph] = useState<FileGraph | null>(null);
   const [search, setSearch] = useState("");
   const [selectedFolders, setSelectedFolders] = useState<Set<string>>(new Set());
@@ -16,11 +30,53 @@ export default function App() {
   const [apiOnly, setApiOnly] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedLinkId, setSelectedLinkId] = useState<string | null>(null);
+  const [direction, setDirection] = useState<Direction>("DOWN");
+  const [uniformWidth, setUniformWidth] = useState(true);
   const [viewport, setViewport] = useState({ width: window.innerWidth, height: window.innerHeight });
 
+  // Which server this build is talking to is a runtime question, so that one
+  // web/dist can be served by either the local CLI or the hosted server.
   useEffect(() => {
-    fetchFileGraph().then(setGraph);
+    fetchConfig()
+      .then(setConfig)
+      // Treat an unreachable /api/config as local mode so `vite dev` against
+      // the mock graph keeps working exactly as before.
+      .catch((err) => {
+        console.warn("Could not read /api/config, assuming local mode:", err);
+        setConfig({ mode: "local", aiEnabled: true, ollamaModel: "llama3.1:8b" });
+      });
   }, []);
+
+  useEffect(() => {
+    if (config?.mode !== "local") return;
+    fetchFileGraphOrMock(LOCAL_PREFIX).then(setGraph);
+  }, [config?.mode]);
+
+  const apiPrefix: ApiPrefix | null = useMemo(() => {
+    if (!config) return null;
+    if (config.mode === "local") return LOCAL_PREFIX;
+    return sessionId ? sessionPrefix(sessionId) : null;
+  }, [config, sessionId]);
+
+  function handleSessionReady(session: SessionResponse) {
+    setSessionId(session.sessionId);
+    setGraph(session.graph);
+    setSelectedId(null);
+    setSelectedLinkId(null);
+  }
+
+  function handleReset() {
+    if (sessionId) {
+      // Best-effort: frees the server's temp dir now instead of at TTL.
+      void fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" }).catch(
+        () => {},
+      );
+    }
+    setSessionId(null);
+    setGraph(null);
+    setSelectedId(null);
+    setSelectedLinkId(null);
+  }
 
   useEffect(() => {
     function handleResize() {
@@ -162,6 +218,9 @@ export default function App() {
     [visibleLinks, selectedId]
   );
 
+  const layoutOptions = useMemo(() => ({ direction, uniformWidth }), [direction, uniformWidth]);
+  const layout = useLayout(visibleNodes, visibleLinks, layoutOptions);
+
   function handleSelectNode(node: GraphNode | null) {
     setSelectedId(node ? node.id : null);
     setSelectedLinkId(null);
@@ -172,11 +231,24 @@ export default function App() {
     setSelectedId(null);
   }
 
-  if (!graph) {
+  if (!config) {
+    return <div className="empty-state">Starting…</div>;
+  }
+
+  if (config.mode === "hosted" && !graph) {
+    return (
+      <OllamaConfigProvider defaultModel={config.ollamaModel}>
+        <UploadScreen maxUploadBytes={config.maxUploadBytes} onReady={handleSessionReady} />
+      </OllamaConfigProvider>
+    );
+  }
+
+  if (!graph || !apiPrefix) {
     return <div className="empty-state">Loading graph...</div>;
   }
 
   return (
+    <OllamaConfigProvider defaultModel={config.ollamaModel}>
     <div className="app">
       <TopBar
         search={search}
@@ -197,12 +269,21 @@ export default function App() {
           setApiOnly((v) => !v);
           setCyclesOnly(false);
         }}
+        direction={direction}
+        onToggleDirection={() => setDirection((d) => (d === "DOWN" ? "RIGHT" : "DOWN"))}
+        uniformWidth={uniformWidth}
+        onToggleUniformWidth={() => setUniformWidth((v) => !v)}
+        hosted={config.mode === "hosted"}
+        onOpenSettings={() => setShowSettings(true)}
+        onReset={handleReset}
       />
 
       <div className="canvas-layer">
+        {layout.result && (
         <GraphCanvas
           nodes={visibleNodes}
           links={visibleLinks}
+          layout={layout.result}
           width={viewport.width}
           height={viewport.height}
           search={search}
@@ -212,9 +293,18 @@ export default function App() {
           onSelectNode={handleSelectNode}
           onSelectLink={handleSelectLink}
         />
+        )}
+        {layout.status === "pending" && <div className="layout-status">Laying out…</div>}
+        {layout.status === "failed" && (
+          <div className="layout-status error">Layout failed: {layout.error}</div>
+        )}
       </div>
 
-      <StatsOverlay stats={graph.stats} folders={folders} />
+      <StatsOverlay
+        stats={graph.stats}
+        folders={folders}
+        layerCount={layout.result?.layerCount ?? 0}
+      />
 
       {(selectedNode || selectedLink) && (
         <SidePanel
@@ -223,8 +313,14 @@ export default function App() {
           link={selectedLink}
           incomingCount={incomingCount}
           outgoingCount={outgoingCount}
+          prefix={apiPrefix}
+          hosted={config.mode === "hosted"}
+          onOpenSettings={() => setShowSettings(true)}
         />
       )}
+
+      {showSettings && <OllamaSettings onClose={() => setShowSettings(false)} />}
     </div>
+    </OllamaConfigProvider>
   );
 }

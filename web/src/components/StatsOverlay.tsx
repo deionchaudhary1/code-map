@@ -4,9 +4,11 @@ import type { FileGraph } from "../types";
 interface StatsOverlayProps {
   stats: FileGraph["stats"];
   folders: string[];
+  /** Rows in the current layered layout — the graph's dependency depth. */
+  layerCount: number;
 }
 
-export default function StatsOverlay({ stats, folders }: StatsOverlayProps) {
+export default function StatsOverlay({ stats, folders, layerCount }: StatsOverlayProps) {
   return (
     <div className="stats-overlay">
       <div className="stats-row">
@@ -29,6 +31,12 @@ export default function StatsOverlay({ stats, folders }: StatsOverlayProps) {
         <span>Routes</span>
         <span>{stats.routeCount}</span>
       </div>
+      {layerCount > 0 && (
+        <div className="stats-row">
+          <span>Depth</span>
+          <span>{layerCount}</span>
+        </div>
+      )}
       {stats.skippedFiles > 0 && (
         <div className="stats-row">
           <span>Skipped</span>

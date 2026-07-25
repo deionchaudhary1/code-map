@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { Project, SyntaxKind, type SourceFile } from "ts-morph";
 import type { FileGraph, FileNode, ImportEdge, RouteDefinition } from "../types.js";
-import { walkSourceFiles, SOURCE_EXTENSIONS } from "./walk.js";
+import { walkSourceFiles, SOURCE_EXTENSIONS, type WalkOptions } from "./walk.js";
 import { tarjanSCC } from "./scc.js";
 import { collectRoutes } from "./routes.js";
 import { collectApiCalls, resolveApiCalls } from "./apiCalls.js";
@@ -137,9 +137,9 @@ function collectEdgesForFile(
   return edges;
 }
 
-export function buildFileGraph(rootDir: string): FileGraph {
+export function buildFileGraph(rootDir: string, options: WalkOptions = {}): FileGraph {
   const absoluteRoot = path.resolve(rootDir);
-  const filePaths = walkSourceFiles(absoluteRoot);
+  const filePaths = walkSourceFiles(absoluteRoot, options);
   const walkedSet = new Set(filePaths);
 
   const project = new Project({

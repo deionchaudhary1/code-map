@@ -1,9 +1,10 @@
 import express from "express";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { ExplainTarget, FileGraph } from "./types.js";
+import type { AppConfig, FileGraph } from "./types.js";
 import { buildSymbolGraph } from "./analyzer/index.js";
 import { explain } from "./llm/explain.js";
+import { parseExplainTarget, EXPLAIN_TARGET_SHAPE } from "./llm/explainTarget.js";
 import { OllamaUnavailableError } from "./llm/ollama.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -14,22 +15,6 @@ export interface ServerOptions {
   ollamaModel: string;
 }
 
-function parseExplainTarget(body: unknown): ExplainTarget | undefined {
-  if (typeof body !== "object" || body === null) return undefined;
-  const b = body as Record<string, unknown>;
-
-  if (b.kind === "import" && typeof b.source === "string" && typeof b.target === "string") {
-    return { kind: "import", source: b.source, target: b.target };
-  }
-  if (b.kind === "apiCall" && typeof b.id === "string") {
-    return { kind: "apiCall", id: b.id };
-  }
-  if (b.kind === "node" && typeof b.id === "string") {
-    return { kind: "node", id: b.id };
-  }
-  return undefined;
-}
-
 export function startServer(
   rootDir: string,
   graph: FileGraph,
@@ -38,6 +23,17 @@ export function startServer(
 ): Promise<string> {
   const app = express();
   app.use(express.json({ limit: "1mb" }));
+
+  // Lets one web/dist build serve both this server and the hosted one — the
+  // frontend asks which it's talking to rather than being compiled for one.
+  app.get("/api/config", (_req, res) => {
+    const config: AppConfig = {
+      mode: "local",
+      aiEnabled: options.aiEnabled,
+      ollamaModel: options.ollamaModel,
+    };
+    res.json(config);
+  });
 
   app.get("/api/graph", (_req, res) => {
     res.json(graph);
@@ -68,9 +64,7 @@ export function startServer(
 
     const target = parseExplainTarget(req.body);
     if (!target) {
-      res.status(400).json({
-        error: 'body must be {kind:"import",source,target} | {kind:"apiCall",id} | {kind:"node",id}',
-      });
+      res.status(400).json({ error: EXPLAIN_TARGET_SHAPE });
       return;
     }
 
