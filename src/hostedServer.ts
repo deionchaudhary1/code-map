@@ -2,10 +2,22 @@ import express, { type Request, type Response } from "express";
 import rateLimit from "express-rate-limit";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { AppConfig, SessionResponse, ExplainContextResponse } from "./types.js";
+import type {
+  AppConfig,
+  SessionResponse,
+  ExplainContextResponse,
+  TopicContextResponse,
+} from "./types.js";
 import { buildFileGraph, buildSymbolGraph, TooManyFilesError } from "./analyzer/index.js";
 import { buildPrompt, SYSTEM_PROMPT } from "./llm/explain.js";
 import { parseExplainTarget, EXPLAIN_TARGET_SHAPE } from "./llm/explainTarget.js";
+import {
+  backfillUnassigned,
+  buildTopicPrompt,
+  parseTopicSet,
+  TOPIC_NUM_PREDICT,
+  TOPIC_SYSTEM_PROMPT,
+} from "./llm/topics.js";
 import { IngestError, formatBytes } from "./ingest/errors.js";
 import { extractZipToDir, unwrapSingleRoot } from "./ingest/zip.js";
 import { cloneRepoToDir } from "./ingest/gitClone.js";
@@ -216,6 +228,49 @@ export function startHostedServer(options: HostedServerOptions): Promise<string>
       suggestedModel: options.ollamaModel,
     };
     res.json(body);
+  });
+
+  app.post("/api/sessions/:sessionId/topics-context", (req, res) => {
+    const session = withSession(req, res);
+    if (!session) return;
+
+    const body: TopicContextResponse = {
+      prompt: buildTopicPrompt(session.graph).prompt,
+      system: TOPIC_SYSTEM_PROMPT,
+      suggestedModel: options.ollamaModel,
+      numPredict: TOPIC_NUM_PREDICT,
+    };
+    res.json(body);
+  });
+
+  /**
+   * Parses a reply the browser's Ollama produced. The prompt's index->path map
+   * is rebuilt here rather than round-tripped through the client: it is derived
+   * deterministically from the session's graph, so sending it out and trusting
+   * it back would add a way for the reply to reference files it shouldn't.
+   */
+  app.post("/api/sessions/:sessionId/topics-parse", (req, res) => {
+    const session = withSession(req, res);
+    if (!session) return;
+
+    const { raw, model } = (req.body ?? {}) as { raw?: unknown; model?: unknown };
+    if (typeof raw !== "string" || raw.length === 0) {
+      res.status(400).json({ error: 'body must be { raw: string, model: string }' });
+      return;
+    }
+
+    const { files } = buildTopicPrompt(session.graph);
+    const parsed = parseTopicSet(
+      raw,
+      files,
+      typeof model === "string" ? model : options.ollamaModel,
+      session.graph.nodes.map((n) => n.id),
+    );
+    if ("error" in parsed) {
+      res.status(502).json(parsed);
+      return;
+    }
+    res.json(backfillUnassigned(parsed, session.graph));
   });
 
   app.delete("/api/sessions/:sessionId", (req, res) => {

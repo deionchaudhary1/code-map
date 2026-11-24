@@ -67,6 +67,93 @@ export interface RouteDefinition {
   line: number;
 }
 
+/**
+ * Shape of a value observed at runtime. Populated by tier 2 (`--trace-values`)
+ * only; the coverage tier never emits these. Defined now so adding tier 2 is
+ * not a schema migration.
+ */
+export type ValueShape =
+  | {
+      kind: "string" | "number" | "boolean" | "null" | "undefined" | "bigint" | "symbol";
+      sample?: string;
+    }
+  | { kind: "array"; length: number; element?: ValueShape; sample?: string }
+  | { kind: "object"; keys: { name: string; shape: ValueShape }[]; sample?: string }
+  | {
+      kind: "instance";
+      className: string;
+      keys: { name: string; shape: ValueShape }[];
+      sample?: string;
+    }
+  | { kind: "function"; name: string; arity: number }
+  | { kind: "promise"; resolved?: ValueShape }
+  | { kind: "map" | "set"; size: number; sample?: string }
+  | { kind: "union"; options: ValueShape[] }
+  | { kind: "truncated" | "circular" | "redacted" };
+
+export interface RuntimeParam {
+  name: string;
+  shape: ValueShape;
+}
+
+export interface RuntimeSample {
+  args: ValueShape[];
+  returns?: ValueShape;
+  threw?: { name: string; message: string };
+  durationMs: number;
+}
+
+export interface RuntimeSymbol {
+  /** SymbolNode.id — "<file id>#<name>" */
+  id: string;
+  /** FileNode.id the symbol belongs to */
+  file: string;
+  /** Times this function was entered. 0 means present but never executed. */
+  calls: number;
+  /** Tier 2 only; 0 under coverage. */
+  totalMs: number;
+  /** Merged union shapes across every observed call (tier 2). */
+  params: RuntimeParam[];
+  returns?: ValueShape;
+  throwCount: number;
+  /** Up to 5 concrete calls (tier 2). */
+  samples: RuntimeSample[];
+}
+
+/** Caller → callee edge observed at runtime. Tier 2 only. */
+export interface RuntimeCallEdge {
+  /** SymbolNode.id, or "<entry>" for top-level */
+  source: string;
+  target: string;
+  count: number;
+  /** True when no static CallEdge covers this pair — a dynamic-dispatch discovery */
+  staticallyUnseen: boolean;
+}
+
+export interface RuntimeTrace {
+  command: string;
+  exitCode: number | null;
+  startedAt: string;
+  durationMs: number;
+  tier: "coverage" | "values";
+  /** FileNode.ids that executed at least once */
+  executedFiles: string[];
+  /** Per-file total hit counts, keyed by FileNode.id */
+  fileHits: Record<string, number>;
+  symbols: RuntimeSymbol[];
+  callEdges: RuntimeCallEdge[];
+  /** Budget exceeded — data is partial */
+  truncated: boolean;
+  /** Coverage entries under the project root that matched no FileNode */
+  unmappedFiles: string[];
+  /**
+   * Set when the run produced no usable coverage. V8 flushes only on a clean
+   * exit, so a timeout or hard kill yields nothing — which is indistinguishable
+   * from "the program ran but executed no code" unless it is said outright.
+   */
+  warning?: string;
+}
+
 export interface FileGraph {
   /** Absolute path of the analyzed project root */
   root: string;
@@ -88,6 +175,52 @@ export interface FileGraph {
     apiCallCount: number;
     routeCount: number;
   };
+  /**
+   * Present only when the CLI was given `--run`. Absent for every other path,
+   * including all of hosted mode, which never executes analyzed code.
+   */
+  runtime?: RuntimeTrace;
+}
+
+/**
+ * A synthetic node for an AI-derived topic — a group of files that do the same
+ * kind of work. The "topic::" prefix namespaces the id so it can never collide
+ * with a FileNode.id or an EndpointNode.id.
+ */
+export interface TopicNode {
+  /** "topic::<slug>" */
+  id: string;
+  name: string;
+  /** 1-2 sentences describing what this part of the codebase does */
+  summary: string;
+  /** FileNode.ids belonging to this topic */
+  members: string[];
+}
+
+/**
+ * The result of one clustering pass. Deliberately not part of FileGraph: it is
+ * generated on demand from a model that may not be running, while FileGraph is
+ * a pure static-analysis artifact that must always be available.
+ */
+export interface TopicSet {
+  topics: TopicNode[];
+  model: string;
+  /** ISO timestamp of when the model produced this */
+  generatedAt: string;
+  /** FileNode.ids the model did not place — rendered neutral, with no hub */
+  unassigned: string[];
+}
+
+/**
+ * Hosted-mode counterpart to ExplainContextResponse: the server assembles the
+ * clustering prompt, the browser runs the model against its own Ollama.
+ */
+export interface TopicContextResponse {
+  prompt: string;
+  system: string;
+  suggestedModel: string;
+  /** Output tokens the response needs; assignment arrays truncate below this. */
+  numPredict: number;
 }
 
 export type SymbolKind = "function" | "class" | "method" | "const-arrow-fn";
@@ -166,9 +299,14 @@ export interface SessionResponse {
 // HTTP API contract served by the local server:
 //   GET  /api/config                    -> AppConfig  ({ mode: "local", ... })
 //   GET  /api/graph                     -> FileGraph
+//   GET  /api/runtime                   -> RuntimeTrace | null  (local only —
+//        hosted mode never runs analyzed code, so it does not serve this)
 //   GET  /api/symbols?file=<FileNode.id> -> SymbolGraph  (404 { error } if unknown file)
 //   POST /api/explain  body: ExplainTarget -> ExplainResponse
 //        (503 { error } when Ollama is unreachable; 404 { error } for unknown ids)
+//   POST /api/topics                    -> TopicSet
+//        (503 { error } when AI is disabled or Ollama is unreachable;
+//         502 { error } when the model's reply could not be parsed)
 //
 // Additional contract served by the hosted server (src/hostedServer.ts). Session
 // routes mirror the local ones under a per-session prefix, so the frontend only
@@ -180,5 +318,8 @@ export interface SessionResponse {
 //   GET    /api/sessions/<id>/symbols?file=<id>   -> SymbolGraph
 //   POST   /api/sessions/<id>/explain-context     -> ExplainContextResponse
 //          body: ExplainTarget
+//   POST   /api/sessions/<id>/topics-context      -> TopicContextResponse
+//   POST   /api/sessions/<id>/topics-parse        -> TopicSet
+//          body: { raw: string, model: string }   (502 { error } if unparseable)
 //   DELETE /api/sessions/<id>                     -> 204
 //        (404 { error } when the session is unknown or has expired)

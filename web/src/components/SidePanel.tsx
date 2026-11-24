@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { ExplainTarget, SymbolGraph } from "../types";
+import type { ExplainTarget, RuntimeTrace, SymbolGraph } from "../types";
 import type { GraphLink, GraphNode } from "../graphModel";
 import {
   fetchExplainContext,
@@ -9,6 +9,7 @@ import {
   type ApiPrefix,
 } from "../api";
 import { generate, OllamaError } from "../ollamaClient";
+import type { TopicIndex } from "../topics";
 import { useOllamaConfig } from "../OllamaConfigContext";
 
 interface SidePanelProps {
@@ -19,6 +20,10 @@ interface SidePanelProps {
   prefix: ApiPrefix;
   hosted: boolean;
   onOpenSettings: () => void;
+  runtime: RuntimeTrace | null;
+  topicIndex: TopicIndex | null;
+  /** Selects a file from a topic's member list. */
+  onSelectFile: (id: string) => void;
 }
 
 /**
@@ -115,6 +120,10 @@ function ExplainSection({
 }
 
 function LinkDetails({ link }: { link: GraphLink }) {
+  // Membership lines are never selected — App redirects a click on one to its
+  // topic hub — so there is nothing to describe here.
+  if (link.kind === "membership") return null;
+
   if (link.kind === "api") {
     const isExternal = link.target.startsWith("endpoint::");
     return (
@@ -199,20 +208,76 @@ function EndpointDetails({ node }: { node: Extract<GraphNode, { kind: "endpoint"
   );
 }
 
+/**
+ * Runtime facts for one file. Symbol counts only exist for files the runtime
+ * actually loaded — a file that never executed has no coverage entry at all,
+ * so it reports as "never executed" without a symbol breakdown.
+ */
+function RuntimeFileSection({
+  node,
+  runtime,
+}: {
+  node: Extract<GraphNode, { kind: "file" }>;
+  runtime: RuntimeTrace;
+}) {
+  const executed = runtime.executedFiles.includes(node.id);
+  const hits = runtime.fileHits[node.id] ?? 0;
+  const symbols = runtime.symbols.filter((s) => s.file === node.id);
+  const ran = symbols.filter((s) => s.calls > 0).length;
+
+  return (
+    <>
+      <div className="section-label">Runtime</div>
+      <div className="row">
+        <span>Executed</span>
+        <span className={executed ? "ran" : "dead"}>{executed ? "yes" : "never ran"}</span>
+      </div>
+      {executed && (
+        <>
+          <div className="row">
+            <span>Function calls</span>
+            <span>{hits}</span>
+          </div>
+          {symbols.length > 0 && (
+            <div className="row">
+              <span>Functions used</span>
+              <span>
+                {ran}/{symbols.length}
+              </span>
+            </div>
+          )}
+        </>
+      )}
+    </>
+  );
+}
+
 function FileDetails({
   node,
   incomingCount,
   outgoingCount,
   prefix,
+  runtime,
+  topicName,
+  topicColor,
 }: {
   node: Extract<GraphNode, { kind: "file" }>;
   incomingCount: number;
   outgoingCount: number;
   prefix: ApiPrefix;
+  runtime: RuntimeTrace | null;
+  /** Null unless topic mode is on and this file was placed. */
+  topicName: string | null;
+  topicColor: string | null;
 }) {
   const [symbolGraph, setSymbolGraph] = useState<SymbolGraph | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  /** SymbolNode.id → observed call count, for the drill-down badges. */
+  const runtimeCalls = runtime
+    ? new Map(runtime.symbols.filter((s) => s.file === node.id).map((s) => [s.id, s.calls]))
+    : null;
 
   async function handleExpand() {
     setLoading(true);
@@ -242,6 +307,15 @@ function FileDetails({
         <span>Folder</span>
         <span>{node.folder}</span>
       </div>
+      {topicName && (
+        <div className="row">
+          <span>Topic</span>
+          <span>
+            <span className="topic-dot" style={{ background: topicColor ?? "#888" }} />
+            {topicName}
+          </span>
+        </div>
+      )}
       <div className="row">
         <span>Entry point</span>
         <span>{node.isEntryPoint ? "yes" : "no"}</span>
@@ -254,6 +328,8 @@ function FileDetails({
         <span>Outgoing</span>
         <span>{outgoingCount}</span>
       </div>
+
+      {runtime && <RuntimeFileSection node={node} runtime={runtime} />}
 
       <div className="section-label">Exports ({node.exports.length})</div>
       {node.exports.length > 0 ? (
@@ -291,6 +367,13 @@ function FileDetails({
                   <span className="name">{sym.name}</span>
                   <span className="kind">{sym.kind}</span>
                   {sym.isExported && <span className="kind">exported</span>}
+                  {runtimeCalls && (
+                    <span className={runtimeCalls.get(sym.id) ? "kind ran" : "kind dead"}>
+                      {runtimeCalls.get(sym.id)
+                        ? `ran ${runtimeCalls.get(sym.id)}×`
+                        : "never ran"}
+                    </span>
+                  )}
                   {localCalls.length > 0 && <div className="calls">calls: {localCalls.join(", ")}</div>}
                   {externalCalls.length > 0 && (
                     <div className="calls">external: {externalCalls.join(", ")}</div>
@@ -305,6 +388,47 @@ function FileDetails({
   );
 }
 
+/**
+ * A topic gets no "Explain" button: the summary shown here came out of the
+ * clustering call itself, so asking the model again would only paraphrase it.
+ */
+function TopicDetails({
+  node,
+  color,
+  onSelectFile,
+}: {
+  node: Extract<GraphNode, { kind: "topic" }>;
+  color: string;
+  onSelectFile: (id: string) => void;
+}) {
+  return (
+    <>
+      <h2>
+        <span className="topic-dot" style={{ background: color }} />
+        {node.name}
+      </h2>
+
+      {node.summary && <p className="topic-summary">{node.summary}</p>}
+
+      <div className="row">
+        <span>Files</span>
+        <span>{node.members.length}</span>
+      </div>
+
+      <div className="section-label">Members</div>
+      <ul className="exports-list">
+        {node.members.map((id) => (
+          <li key={id}>
+            <button className="member-link" onClick={() => onSelectFile(id)}>
+              {id}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </>
+  );
+}
+
 export default function SidePanel({
   node,
   link,
@@ -313,8 +437,13 @@ export default function SidePanel({
   prefix,
   hosted,
   onOpenSettings,
+  runtime,
+  topicIndex,
+  onSelectFile,
 }: SidePanelProps) {
   const explainTarget = explainTargetFor(node, link);
+  const fileTopic =
+    node?.kind === "file" ? (topicIndex?.byFileId.get(node.id) ?? null) : null;
 
   return (
     <div className="side-panel">
@@ -325,9 +454,19 @@ export default function SidePanel({
           incomingCount={incomingCount}
           outgoingCount={outgoingCount}
           prefix={prefix}
+          runtime={runtime}
+          topicName={fileTopic?.topic.name ?? null}
+          topicColor={fileTopic?.color ?? null}
         />
       )}
       {!link && node?.kind === "endpoint" && <EndpointDetails node={node} />}
+      {!link && node?.kind === "topic" && (
+        <TopicDetails
+          node={node}
+          color={topicIndex?.byTopicId.get(node.id)?.color ?? "#888"}
+          onSelectFile={onSelectFile}
+        />
+      )}
 
       {explainTarget && (
         <ExplainSection

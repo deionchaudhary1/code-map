@@ -1,14 +1,31 @@
-import { colorForFolder } from "../palette";
-import type { FileGraph } from "../types";
+import { colorForFolder, UNASSIGNED_COLOR } from "../palette";
+import type { TopicIndex } from "../topics";
+import type { FileGraph, RuntimeTrace } from "../types";
 
 interface StatsOverlayProps {
   stats: FileGraph["stats"];
   folders: string[];
   /** Rows in the current layered layout — the graph's dependency depth. */
   layerCount: number;
+  runtime: RuntimeTrace | null;
+  runtimeMode: boolean;
+  /** Non-null while topic mode is on; the legend then lists topics. */
+  topicIndex: TopicIndex | null;
+  unassignedCount: number;
 }
 
-export default function StatsOverlay({ stats, folders, layerCount }: StatsOverlayProps) {
+export default function StatsOverlay({
+  stats,
+  folders,
+  layerCount,
+  runtime,
+  runtimeMode,
+  topicIndex,
+  unassignedCount,
+}: StatsOverlayProps) {
+  const executed = runtime ? runtime.executedFiles.length : 0;
+  const coveragePct =
+    runtime && stats.fileCount > 0 ? Math.round((executed / stats.fileCount) * 100) : 0;
   return (
     <div className="stats-overlay">
       <div className="stats-row">
@@ -43,14 +60,45 @@ export default function StatsOverlay({ stats, folders, layerCount }: StatsOverla
           <span>{stats.skippedFiles}</span>
         </div>
       )}
+      {runtime && (
+        <>
+          <div className="stats-row">
+            <span>Executed</span>
+            <span>
+              {executed}/{stats.fileCount} ({coveragePct}%)
+            </span>
+          </div>
+          <div className="stats-row">
+            <span>Never ran</span>
+            <span>{stats.fileCount - executed}</span>
+          </div>
+        </>
+      )}
 
       <div className="legend">
-        {folders.map((folder) => (
-          <div className="legend-item" key={folder}>
-            <span className="legend-swatch" style={{ background: colorForFolder(folder) }} />
-            <span>{folder}</span>
+        {/* Topic colors replace folder colors on the canvas, so the legend has
+            to swap too — showing both would explain neither. */}
+        {topicIndex
+          ? topicIndex.views.map((view) => (
+              <div className="legend-item" key={view.topic.id}>
+                <span className="legend-swatch" style={{ background: view.color }} />
+                <span>
+                  {view.topic.name} ({view.topic.members.length})
+                </span>
+              </div>
+            ))
+          : folders.map((folder) => (
+              <div className="legend-item" key={folder}>
+                <span className="legend-swatch" style={{ background: colorForFolder(folder) }} />
+                <span>{folder}</span>
+              </div>
+            ))}
+        {topicIndex && unassignedCount > 0 && (
+          <div className="legend-item">
+            <span className="legend-swatch" style={{ background: UNASSIGNED_COLOR }} />
+            <span>unassigned ({unassignedCount})</span>
           </div>
-        ))}
+        )}
         <div className="legend-item">
           <span className="legend-line" />
           <span>import</span>
@@ -71,6 +119,18 @@ export default function StatsOverlay({ stats, folders, layerCount }: StatsOverla
           <span className="legend-swatch endpoint" />
           <span>endpoint</span>
         </div>
+        {runtimeMode && (
+          <>
+            <div className="legend-item">
+              <span className="legend-swatch executed" />
+              <span>executed</span>
+            </div>
+            <div className="legend-item">
+              <span className="legend-swatch unexecuted" />
+              <span>never ran</span>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

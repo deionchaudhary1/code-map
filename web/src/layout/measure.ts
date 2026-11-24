@@ -6,6 +6,9 @@ import type { GraphNode } from "../graphModel";
 export const BASENAME_FONT = 4.5; // graph units, not divided by globalScale so boxes scale with zoom
 export const DIR_FONT = 3;
 export const METHOD_FONT = 3.2;
+/** Topic hubs are headers over a whole region, so they outrank file labels. */
+export const TOPIC_FONT = 7;
+export const TOPIC_MIN_WIDTH = 60;
 export const LINE_GAP = 1;
 export const PAD_X = 6;
 export const PAD_Y = 3;
@@ -63,7 +66,28 @@ function middleEllipsis(ctx: CanvasRenderingContext2D, text: string, maxWidth: n
   return text.slice(0, 3) + "…";
 }
 
+function measureTopic(ctx: CanvasRenderingContext2D, name: string, memberCount: number): NodeBox {
+  ctx.font = `${TOPIC_FONT}px sans-serif`;
+  const bottom = middleEllipsis(ctx, name, MAX_BOX_WIDTH - PAD_X * 2);
+  const bottomWidth = ctx.measureText(bottom).width;
+
+  ctx.font = `${DIR_FONT}px sans-serif`;
+  const top = `${memberCount} file${memberCount === 1 ? "" : "s"}`;
+  const width = Math.max(bottomWidth, ctx.measureText(top).width, TOPIC_MIN_WIDTH - PAD_X * 2);
+
+  return {
+    w: width + PAD_X * 2,
+    h: TOPIC_FONT + LINE_GAP + DIR_FONT + PAD_Y * 3,
+    top,
+    bottom,
+    topFont: DIR_FONT,
+    bottomFont: TOPIC_FONT,
+  };
+}
+
 function measureOne(ctx: CanvasRenderingContext2D, node: GraphNode): NodeBox {
+  if (node.kind === "topic") return measureTopic(ctx, node.name, node.members.length);
+
   const topFont = node.kind === "file" ? DIR_FONT : METHOD_FONT;
   const bottomFont = BASENAME_FONT;
   const maxTextWidth = MAX_BOX_WIDTH - PAD_X * 2;
@@ -105,10 +129,14 @@ export function measureNodes(nodes: GraphNode[], uniformWidth: boolean): Map<str
   const boxes = new Map<string, NodeBox>();
   for (const node of nodes) boxes.set(node.id, measureOne(ctx, node));
 
-  if (uniformWidth && boxes.size > 0) {
+  // Topic hubs are deliberately left out of the equalization: they are headers,
+  // not rows in the flowchart, and letting their wider boxes set the common
+  // width would inflate every file box on screen.
+  const fileBoxes = nodes.filter((n) => n.kind !== "topic").map((n) => boxes.get(n.id)!);
+  if (uniformWidth && fileBoxes.length > 0) {
     let widest = 0;
-    for (const box of boxes.values()) widest = Math.max(widest, box.w);
-    for (const box of boxes.values()) box.w = widest;
+    for (const box of fileBoxes) widest = Math.max(widest, box.w);
+    for (const box of fileBoxes) box.w = widest;
   }
   return boxes;
 }

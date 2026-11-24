@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import type { AppConfig, FileGraph } from "./types.js";
 import { buildSymbolGraph } from "./analyzer/index.js";
 import { explain } from "./llm/explain.js";
+import { topicsFor } from "./llm/topics.js";
 import { parseExplainTarget, EXPLAIN_TARGET_SHAPE } from "./llm/explainTarget.js";
 import { OllamaUnavailableError } from "./llm/ollama.js";
 
@@ -39,6 +40,12 @@ export function startServer(
     res.json(graph);
   });
 
+  // Local only. The hosted server has no equivalent because it never executes
+  // analyzed code, so there is never a trace to serve.
+  app.get("/api/runtime", (_req, res) => {
+    res.json(graph.runtime ?? null);
+  });
+
   app.get("/api/symbols", (req, res) => {
     const file = req.query.file;
     if (typeof file !== "string" || file.length === 0) {
@@ -72,6 +79,30 @@ export function startServer(
       const result = await explain(graph, target, options.ollamaModel);
       if ("error" in result) {
         res.status(404).json(result);
+        return;
+      }
+      res.json(result);
+    } catch (err) {
+      if (err instanceof OllamaUnavailableError) {
+        res.status(503).json({ error: err.message });
+        return;
+      }
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.post("/api/topics", async (_req, res) => {
+    if (!options.aiEnabled) {
+      res.status(503).json({ error: "AI topic grouping is disabled (started with --no-ai)." });
+      return;
+    }
+
+    try {
+      const result = await topicsFor(graph, options.ollamaModel);
+      if ("error" in result) {
+        // The model answered, it just didn't answer usefully — that is a bad
+        // gateway, not a missing resource.
+        res.status(502).json(result);
         return;
       }
       res.json(result);

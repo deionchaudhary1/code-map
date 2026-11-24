@@ -1,13 +1,25 @@
 import { useEffect, useMemo, useState } from "react";
-import type { AppConfig, FileGraph, SessionResponse } from "./types";
+import type { AppConfig, FileGraph, SessionResponse, TopicSet } from "./types";
 import {
   fetchConfig,
   fetchFileGraphOrMock,
+  fetchTopicContext,
+  fetchTopics,
+  parseTopics,
   sessionPrefix,
   LOCAL_PREFIX,
   type ApiPrefix,
 } from "./api";
-import { toGraphLinks, toGraphNodes, type GraphLink, type GraphNode } from "./graphModel";
+import {
+  toGraphLinks,
+  toGraphNodes,
+  toMembershipLinks,
+  toTopicNodes,
+  type GraphLink,
+  type GraphNode,
+} from "./graphModel";
+import { buildTopicIndex } from "./topics";
+import { generate } from "./ollamaClient";
 import TopBar from "./components/TopBar";
 import StatsOverlay from "./components/StatsOverlay";
 import SidePanel from "./components/SidePanel";
@@ -30,6 +42,12 @@ export default function App() {
   const [apiOnly, setApiOnly] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedLinkId, setSelectedLinkId] = useState<string | null>(null);
+  const [runtimeMode, setRuntimeMode] = useState(false);
+  const [hideUnexecuted, setHideUnexecuted] = useState(false);
+  const [topics, setTopics] = useState<TopicSet | null>(null);
+  const [topicsLoading, setTopicsLoading] = useState(false);
+  const [topicsError, setTopicsError] = useState<string | null>(null);
+  const [topicMode, setTopicMode] = useState(false);
   const [direction, setDirection] = useState<Direction>("DOWN");
   const [uniformWidth, setUniformWidth] = useState(true);
   const [viewport, setViewport] = useState({ width: window.innerWidth, height: window.innerHeight });
@@ -65,6 +83,43 @@ export default function App() {
     setSelectedLinkId(null);
   }
 
+  /**
+   * Local mode has the server run the model; hosted mode can only reach the
+   * user's Ollama from this browser, so the server hands over the prompt and
+   * takes the raw reply back for parsing. `host`/`model` come from TopBar,
+   * which sits inside OllamaConfigProvider — App renders that provider and so
+   * cannot read the context itself.
+   */
+  async function handleGenerateTopics(host: string, model: string) {
+    if (!apiPrefix || topicsLoading) return;
+    setTopicsLoading(true);
+    setTopicsError(null);
+    try {
+      if (config?.mode !== "hosted") {
+        setTopics(await fetchTopics(apiPrefix));
+      } else {
+        const context = await fetchTopicContext(apiPrefix);
+        const raw = await generate({
+          host,
+          model,
+          prompt: context.prompt,
+          system: context.system,
+          format: "json",
+          numPredict: context.numPredict,
+        });
+        setTopics(await parseTopics(apiPrefix, raw, model));
+      }
+      setTopicMode(true);
+      // Topic colors and runtime heat both own the node border; showing them
+      // at once would make each unreadable.
+      setRuntimeMode(false);
+    } catch (err) {
+      setTopicsError(err instanceof Error ? err.message : "Could not group files into topics");
+    } finally {
+      setTopicsLoading(false);
+    }
+  }
+
   function handleReset() {
     if (sessionId) {
       // Best-effort: frees the server's temp dir now instead of at TTL.
@@ -76,6 +131,10 @@ export default function App() {
     setGraph(null);
     setSelectedId(null);
     setSelectedLinkId(null);
+    // Topics describe the old project's files and mean nothing for the next one.
+    setTopics(null);
+    setTopicMode(false);
+    setTopicsError(null);
   }
 
   useEffect(() => {
@@ -93,6 +152,14 @@ export default function App() {
   const extensions = useMemo(
     () => (graph ? Array.from(new Set(graph.nodes.map((n) => n.extension))).sort() : []),
     [graph]
+  );
+
+  const runtime = graph?.runtime ?? null;
+
+  /** Turning runtime mode on by default would be surprising; opt in, but only offer it when a trace exists. */
+  const executedIds = useMemo(
+    () => new Set(runtime?.executedFiles ?? []),
+    [runtime]
   );
 
   const cycleNodeIds = useMemo(() => {
@@ -143,9 +210,13 @@ export default function App() {
       if (selectedExtensions.size > 0 && !selectedExtensions.has(n.extension)) return false;
       if (cyclesOnly && !cycleNodeIds.has(n.id)) return false;
       if (apiOnly && !apiNodeIds.has(n.id)) return false;
+      if (runtimeMode && hideUnexecuted && !executedIds.has(n.id)) return false;
       return true;
     });
-  }, [graph, selectedFolders, selectedExtensions, cyclesOnly, cycleNodeIds, apiOnly, apiNodeIds]);
+  }, [
+    graph, selectedFolders, selectedExtensions, cyclesOnly, cycleNodeIds, apiOnly, apiNodeIds,
+    runtimeMode, hideUnexecuted, executedIds,
+  ]);
 
   const fileIdSet = useMemo(() => new Set(filteredFiles.map((n) => n.id)), [filteredFiles]);
 
@@ -173,21 +244,36 @@ export default function App() {
     });
   }, [graph, fileIdSet, cyclesOnly, apiOnly]);
 
+  const topicIndex = useMemo(
+    () => (topicMode ? buildTopicIndex(topics) : null),
+    [topicMode, topics]
+  );
+
+  /** Only topics with a member still on screen; the rest would be empty hubs. */
+  const visibleTopics = useMemo(() => {
+    if (!topicIndex) return [];
+    return topicIndex.views
+      .map((v) => v.topic)
+      .filter((t) => t.members.some((m) => fileIdSet.has(m)));
+  }, [topicIndex, fileIdSet]);
+
   // An API call can target a file that the current filters hid; drop those so
   // every link has both endpoints present in the node set.
   const visibleNodes = useMemo(
-    () => toGraphNodes(filteredFiles, filteredEndpoints),
-    [filteredFiles, filteredEndpoints]
+    () => [...toGraphNodes(filteredFiles, filteredEndpoints), ...toTopicNodes(visibleTopics)],
+    [filteredFiles, filteredEndpoints, visibleTopics]
   );
   const visibleNodeIds = useMemo(() => new Set(visibleNodes.map((n) => n.id)), [visibleNodes]);
 
   const visibleLinks = useMemo(
-    () =>
-      toGraphLinks(
+    () => [
+      ...toGraphLinks(
         filteredImports,
         filteredApiCalls.filter((c) => visibleNodeIds.has(c.target))
       ),
-    [filteredImports, filteredApiCalls, visibleNodeIds]
+      ...toMembershipLinks(visibleTopics, fileIdSet),
+    ],
+    [filteredImports, filteredApiCalls, visibleNodeIds, visibleTopics, fileIdSet]
   );
 
   const selectedNode = useMemo(
@@ -209,12 +295,20 @@ export default function App() {
     return ids;
   }, [selectedId, visibleLinks]);
 
+  // Membership links are excluded: they are a drawing device, not a dependency,
+  // and counting them would inflate every file's inbound count by one.
   const incomingCount = useMemo(
-    () => (selectedId ? visibleLinks.filter((l) => l.target === selectedId).length : 0),
+    () =>
+      selectedId
+        ? visibleLinks.filter((l) => l.kind !== "membership" && l.target === selectedId).length
+        : 0,
     [visibleLinks, selectedId]
   );
   const outgoingCount = useMemo(
-    () => (selectedId ? visibleLinks.filter((l) => l.source === selectedId).length : 0),
+    () =>
+      selectedId
+        ? visibleLinks.filter((l) => l.kind !== "membership" && l.source === selectedId).length
+        : 0,
     [visibleLinks, selectedId]
   );
 
@@ -227,6 +321,16 @@ export default function App() {
   }
 
   function handleSelectLink(link: GraphLink | null) {
+    // A membership line has nothing of its own to say; clicking one is a
+    // clumsy way of reaching for the topic it belongs to.
+    if (link?.kind === "membership") {
+      // force-graph hands back its own copy, whose `source` it has already
+      // replaced with the node object.
+      const source: unknown = link.source;
+      setSelectedId(typeof source === "string" ? source : ((source as GraphNode)?.id ?? null));
+      setSelectedLinkId(null);
+      return;
+    }
     setSelectedLinkId(link ? link.linkId : null);
     setSelectedId(null);
   }
@@ -273,6 +377,21 @@ export default function App() {
         onToggleDirection={() => setDirection((d) => (d === "DOWN" ? "RIGHT" : "DOWN"))}
         uniformWidth={uniformWidth}
         onToggleUniformWidth={() => setUniformWidth((v) => !v)}
+        aiEnabled={config.mode === "hosted" || config.aiEnabled}
+        hasTopics={topics !== null}
+        topicMode={topicMode}
+        topicsLoading={topicsLoading}
+        topicsError={topicsError}
+        onGenerateTopics={handleGenerateTopics}
+        onToggleTopicMode={() => setTopicMode((v) => !v)}
+        hasRuntime={runtime !== null}
+        runtimeMode={runtimeMode}
+        onToggleRuntimeMode={() => {
+          setRuntimeMode((v) => !v);
+          setTopicMode(false);
+        }}
+        hideUnexecuted={hideUnexecuted}
+        onToggleHideUnexecuted={() => setHideUnexecuted((v) => !v)}
         hosted={config.mode === "hosted"}
         onOpenSettings={() => setShowSettings(true)}
         onReset={handleReset}
@@ -292,6 +411,10 @@ export default function App() {
           neighborIds={neighborIds}
           onSelectNode={handleSelectNode}
           onSelectLink={handleSelectLink}
+          runtimeMode={runtimeMode}
+          executedIds={executedIds}
+          fileHits={runtime?.fileHits ?? {}}
+          topicIndex={topicIndex}
         />
         )}
         {layout.status === "pending" && <div className="layout-status">Laying out…</div>}
@@ -304,6 +427,10 @@ export default function App() {
         stats={graph.stats}
         folders={folders}
         layerCount={layout.result?.layerCount ?? 0}
+        runtime={runtime}
+        runtimeMode={runtimeMode}
+        topicIndex={topicIndex}
+        unassignedCount={topicMode ? (topics?.unassigned.length ?? 0) : 0}
       />
 
       {(selectedNode || selectedLink) && (
@@ -316,6 +443,9 @@ export default function App() {
           prefix={apiPrefix}
           hosted={config.mode === "hosted"}
           onOpenSettings={() => setShowSettings(true)}
+          runtime={runtime}
+          topicIndex={topicIndex}
+          onSelectFile={(id) => setSelectedId(id)}
         />
       )}
 

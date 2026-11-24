@@ -142,6 +142,49 @@ body,
   color: #c0c0c0;
 }
 
+/* Topic colours are assigned at runtime, so the swatch takes an inline
+   background; everything else about it lives here. */
+.topic-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: baseline;
+}
+
+.side-panel .topic-summary {
+  margin: 0 0 12px 0;
+  color: #c0c0c0;
+  line-height: 1.5;
+}
+
+.side-panel button.member-link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: #c0c0c0;
+  font: inherit;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.side-panel button.member-link:hover {
+  color: #e6e6e6;
+  text-decoration: underline;
+}
+
+.top-bar-error {
+  color: #e08a8a;
+  font-size: 12px;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .side-panel button.expand-btn {
   margin-top: 14px;
   width: 100%;
@@ -609,4 +652,35 @@ body,
   justify-content: flex-end;
   gap: 8px;
   margin-top: 20px;
+}
+
+/* Runtime mode */
+.side-panel .row span.ran {
+  color: #86d69a;
+}
+
+.side-panel .row span.dead {
+  color: #8a8f98;
+}
+
+.symbol-item .kind.ran {
+  border-color: #2f5c3a;
+  background: #16241a;
+  color: #86d69a;
+}
+
+.symbol-item .kind.dead {
+  border-color: #3a3f47;
+  background: transparent;
+  color: #7d7d7d;
+}
+
+.legend-swatch.executed {
+  background: transparent;
+  border: 1.5px solid #5bbf8a;
+}
+
+.legend-swatch.unexecuted {
+  background: transparent;
+  border: 1px dashed #3a3f47;
 }

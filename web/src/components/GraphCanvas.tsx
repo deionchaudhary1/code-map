@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef } from "react";
 import ForceGraph2D, { type NodeObject, type LinkObject } from "react-force-graph-2d";
-import type { GraphLink, GraphNode } from "../graphModel";
+import { nodeLabel, type GraphLink, type GraphNode } from "../graphModel";
 import type { LayoutResult, Point } from "../layout/elk";
 import {
   METHOD_FONT,
@@ -9,6 +9,7 @@ import {
   type NodeBox,
 } from "../layout/measure";
 import { colorForFolder } from "../palette";
+import { topicColorForFile, type TopicIndex } from "../topics";
 
 interface GraphCanvasProps {
   nodes: GraphNode[];
@@ -22,6 +23,12 @@ interface GraphCanvasProps {
   neighborIds: Set<string>;
   onSelectNode: (node: GraphNode | null) => void;
   onSelectLink: (link: GraphLink | null) => void;
+  /** When true, nodes are styled by whether they executed at runtime. */
+  runtimeMode: boolean;
+  executedIds: Set<string>;
+  fileHits: Record<string, number>;
+  /** Null unless topics have been generated and topic mode is on. */
+  topicIndex: TopicIndex | null;
 }
 
 type PositionedNode = GraphNode & { x: number; y: number };
@@ -46,6 +53,18 @@ const COLOR_EDGE_DEFAULT = "#4a4f58";
 const COLOR_EDGE_CYCLE = "#d65b5b";
 const COLOR_API = "#e0883a";
 const COLOR_ENDPOINT_BG = "#241d14";
+const COLOR_UNEXECUTED = "#3a3f47";
+const COLOR_HOT = "#5bbf8a";
+
+/**
+ * Hit counts are extremely long-tailed — an inner helper can run thousands of
+ * times more than an entry point — so intensity is scaled logarithmically
+ * against the busiest file rather than linearly.
+ */
+function heatFraction(hits: number, maxHits: number): number {
+  if (hits <= 0 || maxHits <= 0) return 0;
+  return Math.log10(1 + hits) / Math.log10(1 + maxHits);
+}
 
 function roundRectPath(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
   const radius = Math.min(r, w / 2, h / 2);
@@ -108,8 +127,39 @@ function longestSegmentMidpoint(points: Point[]): Point {
   return best;
 }
 
-function nodeBorderColor(node: GraphNode): string {
-  return node.kind === "file" ? colorForFolder(node.folder) : COLOR_API;
+function nodeBorderColor(node: GraphNode, topicIndex: TopicIndex | null): string {
+  if (node.kind === "endpoint") return COLOR_API;
+  if (node.kind === "topic") {
+    return topicIndex?.byTopicId.get(node.id)?.color ?? COLOR_LABEL;
+  }
+  return topicIndex ? topicColorForFile(topicIndex, node.id) : colorForFolder(node.folder);
+}
+
+/** Membership lines sit under the import graph rather than competing with it —
+ * 5 hubs times 60 members is a haystack at full strength. */
+const MEMBERSHIP_ALPHA = 0.3;
+const MEMBERSHIP_ALPHA_FOCUSED = 0.9;
+
+/**
+ * force-graph replaces a link's `source`/`target` strings with references to
+ * the node objects once it ingests the data, so every read of them inside a
+ * draw callback has to tolerate both forms. Import and API links happened to
+ * survive this because they are drawn from an ELK route keyed by `linkId`;
+ * membership links, which fall back to a straight line computed from the
+ * endpoints, did not — they silently drew nothing.
+ */
+function endpointId(value: unknown): string {
+  if (typeof value === "string") return value;
+  return String((value as { id?: unknown })?.id ?? "");
+}
+
+/** Tints a #rrggbb toward transparency for hub fills. */
+function withAlpha(hex: string, alpha: number): string {
+  const value = parseInt(hex.slice(1), 16);
+  const r = (value >> 16) & 255;
+  const g = (value >> 8) & 255;
+  const b = value & 255;
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
 export default function GraphCanvas({
@@ -124,6 +174,10 @@ export default function GraphCanvas({
   neighborIds,
   onSelectNode,
   onSelectLink,
+  runtimeMode,
+  executedIds,
+  fileHits,
+  topicIndex,
 }: GraphCanvasProps) {
   const fgRef = useRef<any>(null);
   const { positions, routes, boxes } = layout;
@@ -166,6 +220,17 @@ export default function GraphCanvas({
   // there would be O(nodes × links) per repaint.
   const nodeById = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
 
+  /** Busiest visible file, used as the top of the heat scale. */
+  const maxHits = useMemo(() => {
+    if (!runtimeMode) return 0;
+    let max = 0;
+    for (const node of nodes) {
+      const hits = fileHits[node.id] ?? 0;
+      if (hits > max) max = hits;
+    }
+    return max;
+  }, [runtimeMode, nodes, fileHits]);
+
   function isNodeDimmed(node: GraphNode): boolean {
     if (selectedLink) {
       return node.id !== selectedLink.source && node.id !== selectedLink.target;
@@ -174,8 +239,7 @@ export default function GraphCanvas({
       return node.id !== selectedId && !neighborIds.has(node.id);
     }
     if (searchLower) {
-      const haystack = node.kind === "file" ? node.id : `${node.method} ${node.url}`;
-      return !haystack.toLowerCase().includes(searchLower);
+      return !nodeLabel(node).toLowerCase().includes(searchLower);
     }
     return false;
   }
@@ -186,9 +250,11 @@ export default function GraphCanvas({
    * arrowhead has to point at the dependency regardless.
    */
   function routeFor(link: GraphLink): Point[] | null {
+    const sourceId = endpointId(link.source);
+    const targetId = endpointId(link.target);
     const route = routes.get(link.linkId);
     if (route && route.length >= 2) {
-      const targetPos = positions.get(link.target);
+      const targetPos = positions.get(targetId);
       if (targetPos) {
         const head = route[0];
         const tail = route[route.length - 1];
@@ -199,11 +265,11 @@ export default function GraphCanvas({
       return route;
     }
 
-    const source = positions.get(link.source);
-    const target = positions.get(link.target);
+    const source = positions.get(sourceId);
+    const target = positions.get(targetId);
     if (!source || !target) return null;
-    const sourceBox = boxes.get(link.source) ?? DEFAULT_BOX;
-    const targetBox = boxes.get(link.target) ?? DEFAULT_BOX;
+    const sourceBox = boxes.get(sourceId) ?? DEFAULT_BOX;
+    const targetBox = boxes.get(targetId) ?? DEFAULT_BOX;
     return [
       boxBoundaryPoint(source.x, source.y, target.x, target.y, sourceBox),
       boxBoundaryPoint(target.x, target.y, source.x, source.y, targetBox),
@@ -223,6 +289,13 @@ export default function GraphCanvas({
       enableNodeDrag={false}
       cooldownTicks={0}
       warmupTicks={0}
+      // force-graph's default tooltip accessor reads `name`, which only topic
+      // hubs have — so hovering one repeated the label already drawn in the
+      // box. Show the summary there instead, and nothing for other kinds.
+      nodeLabel={(n) => {
+        const node = n as unknown as GraphNode;
+        return node.kind === "topic" ? node.summary : "";
+      }}
       onNodeClick={(n) => onSelectNode(n as unknown as GraphNode)}
       onLinkClick={(l) => onSelectLink(l as unknown as GraphLink)}
       onBackgroundClick={() => {
@@ -234,20 +307,66 @@ export default function GraphCanvas({
         const dimmed = hasFocus && isNodeDimmed(node);
         const selected = node.id === selectedId;
         const isEndpoint = node.kind === "endpoint";
+        const isTopic = node.kind === "topic";
 
         const { w, h, top, bottom, topFont, bottomFont } = boxes.get(node.id) ?? DEFAULT_BOX;
         const x = node.x - w / 2;
         const y = node.y - h / 2;
 
-        ctx.globalAlpha = dimmed ? 0.15 : 1;
+        // Hubs are labels for a region, not members of the flowchart, so they
+        // are filled with their own color rather than the shared box color.
+        if (isTopic) {
+          const color = nodeBorderColor(node, topicIndex);
+          ctx.globalAlpha = dimmed ? 0.2 : 1;
+          roundRectPath(ctx, x, y, w, h, CORNER_RADIUS * 2);
+          ctx.fillStyle = withAlpha(color, selected ? 0.32 : 0.18);
+          ctx.fill();
+          ctx.lineWidth = selected ? 2.4 : 1.6;
+          ctx.strokeStyle = color;
+          ctx.stroke();
+
+          ctx.textAlign = "center";
+          ctx.textBaseline = "top";
+          ctx.font = `${topFont}px sans-serif`;
+          ctx.fillStyle = color;
+          ctx.fillText(top, node.x, y + PAD_Y);
+          ctx.font = `600 ${bottomFont}px sans-serif`;
+          ctx.fillStyle = COLOR_LABEL;
+          ctx.fillText(bottom, node.x, y + PAD_Y + topFont + LINE_GAP);
+          ctx.globalAlpha = 1;
+          return;
+        }
+
+        // In runtime mode, code that never ran is the signal — render it hollow
+        // and faded so live code reads as the foreground.
+        const unexecuted = runtimeMode && node.kind === "file" && !executedIds.has(node.id);
+        const heat = runtimeMode && node.kind === "file"
+          ? heatFraction(fileHits[node.id] ?? 0, maxHits)
+          : 0;
+
+        ctx.globalAlpha = dimmed ? 0.15 : unexecuted ? 0.4 : 1;
 
         // Endpoints get a stadium outline so they read as "not a file" at a glance.
         roundRectPath(ctx, x, y, w, h, isEndpoint ? h / 2 : CORNER_RADIUS);
-        ctx.fillStyle = selected ? COLOR_BG_SELECTED : isEndpoint ? COLOR_ENDPOINT_BG : COLOR_BG;
-        ctx.fill();
-        ctx.lineWidth = selected ? 2 : 1.2;
-        ctx.strokeStyle = selected ? COLOR_BORDER_SELECTED : nodeBorderColor(node);
-        ctx.setLineDash(isEndpoint ? [2, 1.5] : []);
+        ctx.fillStyle = unexecuted
+          ? "transparent"
+          : selected
+            ? COLOR_BG_SELECTED
+            : isEndpoint
+              ? COLOR_ENDPOINT_BG
+              : COLOR_BG;
+        if (!unexecuted) ctx.fill();
+        // Box geometry comes from ELK, so hit intensity is carried by border
+        // weight and colour rather than size, which would fight the layout.
+        ctx.lineWidth = selected ? 2 : unexecuted ? 0.8 : 1.2 + heat * 1.6;
+        ctx.strokeStyle = selected
+          ? COLOR_BORDER_SELECTED
+          : unexecuted
+            ? COLOR_UNEXECUTED
+            : heat > 0
+              ? COLOR_HOT
+              : nodeBorderColor(node, topicIndex);
+        ctx.setLineDash(isEndpoint ? [2, 1.5] : unexecuted ? [1.5, 1.5] : []);
         ctx.stroke();
         ctx.setLineDash([]);
 
@@ -281,10 +400,33 @@ export default function GraphCanvas({
         const points = routeFor(link);
         if (!points) return;
 
+        // Membership lines are a different class of mark: no arrowhead (a file
+        // does not "depend on" its topic) and near-invisible until the topic or
+        // one of its files is in focus.
+        if (link.kind === "membership") {
+          const topicId = endpointId(link.source);
+          const color = topicIndex?.byTopicId.get(topicId)?.color ?? COLOR_EDGE_DEFAULT;
+          const focused =
+            link.linkId === selectedLinkId ||
+            topicId === selectedId ||
+            endpointId(link.target) === selectedId;
+
+          ctx.save();
+          ctx.globalAlpha = focused ? MEMBERSHIP_ALPHA_FOCUSED : MEMBERSHIP_ALPHA;
+          ctx.strokeStyle = color;
+          ctx.lineWidth = focused ? 1.4 : 0.9;
+          ctx.beginPath();
+          ctx.moveTo(points[0].x, points[0].y);
+          for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
+          ctx.stroke();
+          ctx.restore();
+          return;
+        }
+
         const isApi = link.kind === "api";
         const selected = link.linkId === selectedLinkId;
-        const sourceNode = nodeById.get(link.source);
-        const targetNode = nodeById.get(link.target);
+        const sourceNode = nodeById.get(endpointId(link.source));
+        const targetNode = nodeById.get(endpointId(link.target));
         const dimmed =
           hasFocus &&
           !selected &&

@@ -35,6 +35,11 @@ export interface GenerateOptions {
   system: string;
   timeoutMs?: number;
   signal?: AbortSignal;
+  /** "json" constrains Ollama's decoder to valid JSON. */
+  format?: "json";
+  /** Output token budget. Callers expecting long structured replies must raise
+   * this — the default suits a few sentences of prose, nothing more. */
+  numPredict?: number;
 }
 
 export async function generate({
@@ -44,6 +49,8 @@ export async function generate({
   system,
   timeoutMs = 120_000,
   signal,
+  format,
+  numPredict = 300,
 }: GenerateOptions): Promise<string> {
   const base = normalizeHost(host);
   const controller = new AbortController();
@@ -60,7 +67,8 @@ export async function generate({
         prompt,
         system,
         stream: false,
-        options: { temperature: 0.2, num_predict: 300 },
+        ...(format ? { format } : {}),
+        options: { temperature: 0.2, num_predict: numPredict },
       }),
       signal: controller.signal,
     });

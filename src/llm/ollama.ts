@@ -15,6 +15,11 @@ interface GenerateOptions {
   system: string;
   /** Generation is capped so a slow local model can't hang a request forever. */
   timeoutMs?: number;
+  /** "json" constrains Ollama's decoder to valid JSON. */
+  format?: "json";
+  /** Output token budget. Callers expecting long structured replies must raise
+   * this — the default suits a few sentences of prose, nothing more. */
+  numPredict?: number;
 }
 
 export async function generate({
@@ -22,6 +27,8 @@ export async function generate({
   prompt,
   system,
   timeoutMs = 120_000,
+  format,
+  numPredict = 300,
 }: GenerateOptions): Promise<string> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -36,7 +43,8 @@ export async function generate({
         prompt,
         system,
         stream: false,
-        options: { temperature: 0.2, num_predict: 300 },
+        ...(format ? { format } : {}),
+        options: { temperature: 0.2, num_predict: numPredict },
       }),
       signal: controller.signal,
     });

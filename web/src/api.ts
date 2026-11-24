@@ -6,6 +6,8 @@ import type {
   FileGraph,
   SessionResponse,
   SymbolGraph,
+  TopicContextResponse,
+  TopicSet,
 } from "./types";
 import mockGraph from "../mock/graph.json";
 
@@ -86,6 +88,41 @@ export async function fetchExplainContext(
   });
   if (!res.ok) throw await errorFrom(res, "POST explain-context");
   return (await res.json()) as ExplainContextResponse;
+}
+
+/** Local mode: the server owns the Ollama call and returns finished topics. */
+export async function fetchTopics(prefix: ApiPrefix): Promise<TopicSet> {
+  const res = await fetch(`${prefix}/topics`, { method: "POST" });
+  if (!res.ok) throw await errorFrom(res, "POST topics");
+  return (await res.json()) as TopicSet;
+}
+
+/** Hosted mode: the server assembles the prompt, the browser runs the model. */
+export async function fetchTopicContext(prefix: ApiPrefix): Promise<TopicContextResponse> {
+  const res = await fetch(`${prefix}/topics-context`, { method: "POST" });
+  if (!res.ok) throw await errorFrom(res, "POST topics-context");
+  return (await res.json()) as TopicContextResponse;
+}
+
+/**
+ * Hosted mode: hands the model's raw reply back for parsing. The parser is
+ * fiddly enough (fenced JSON, index validation, topic clamping, backfill from
+ * the import graph) that a second copy in the browser would drift from the
+ * server's; this route is a pure function over the session's graph and runs
+ * no analyzed code.
+ */
+export async function parseTopics(
+  prefix: ApiPrefix,
+  raw: string,
+  model: string,
+): Promise<TopicSet> {
+  const res = await fetch(`${prefix}/topics-parse`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ raw, model }),
+  });
+  if (!res.ok) throw await errorFrom(res, "POST topics-parse");
+  return (await res.json()) as TopicSet;
 }
 
 export async function uploadZip(file: File): Promise<SessionResponse> {

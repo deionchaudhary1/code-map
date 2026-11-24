@@ -57,6 +57,69 @@ const LAYOUT_OPTIONS: Record<string, string> = {
   "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES",
 };
 
+/** Gap between a hub and the member box it is nudged away from. */
+const HUB_CLEARANCE = 6;
+
+/**
+ * Places topic hubs after ELK has run, at the centroid of their members.
+ *
+ * Feeding membership edges to ELK instead is the obvious implementation and it
+ * ruins the diagram: the layered algorithm pulls every hub into the first layer
+ * and every file into the second, collapsing the import hierarchy that is the
+ * graph's whole point. Placing hubs afterwards leaves ELK's input byte-identical
+ * to what it was before topics existed, so toggling topic mode cannot change the
+ * import layout at all.
+ */
+function placeTopicHubs(
+  topicNodes: GraphNode[],
+  boxes: Map<string, NodeBox>,
+  positions: Map<string, Point>,
+): void {
+  // Starts as the file/endpoint boxes ELK placed; each hub is appended once it
+  // settles, so later hubs also avoid earlier ones. Without that, topics whose
+  // members share a region land on the same spot and render as one unreadable
+  // stack of overlapping labels.
+  const occupied = [...positions.entries()].map(([id, point]) => ({
+    point,
+    box: boxes.get(id)!,
+  }));
+
+  for (const node of topicNodes) {
+    if (node.kind !== "topic") continue;
+    const memberPoints = node.members
+      .map((id) => positions.get(id))
+      .filter((p): p is Point => p !== undefined);
+    if (memberPoints.length === 0) continue;
+
+    const centroid = {
+      x: memberPoints.reduce((sum, p) => sum + p.x, 0) / memberPoints.length,
+      y: memberPoints.reduce((sum, p) => sum + p.y, 0) / memberPoints.length,
+    };
+
+    // A centroid almost always lands on top of a member. Lift the hub above the
+    // topic's own highest member instead, which also reads as a heading.
+    const hubBox = boxes.get(node.id)!;
+    const topMost = Math.min(...memberPoints.map((p) => p.y));
+    let y = topMost - hubBox.h - HUB_CLEARANCE;
+
+    // Then walk upward until nothing overlaps — cheap, and bounded because
+    // each step clears at least one box height.
+    for (let attempt = 0; attempt < 40; attempt++) {
+      const collision = occupied.find(
+        ({ point, box }) =>
+          Math.abs(point.x - centroid.x) < (box.w + hubBox.w) / 2 + HUB_CLEARANCE &&
+          Math.abs(point.y - y) < (box.h + hubBox.h) / 2 + HUB_CLEARANCE,
+      );
+      if (!collision) break;
+      y = collision.point.y - collision.box.h / 2 - hubBox.h / 2 - HUB_CLEARANCE;
+    }
+
+    const placed = { x: centroid.x, y };
+    positions.set(node.id, placed);
+    occupied.push({ point: placed, box: hubBox });
+  }
+}
+
 /** Concatenates an edge's sections into a single polyline. */
 function sectionsToPolyline(edge: ElkExtendedEdge): Point[] {
   const points: Point[] = [];
@@ -81,11 +144,15 @@ export async function layoutGraph(
     return { positions: new Map(), routes: new Map(), boxes, layerCount: 0 };
   }
 
-  const nodeIds = new Set(nodes.map((n) => n.id));
+  // Topic hubs and their membership edges are held back from ELK entirely and
+  // positioned afterwards — see placeTopicHubs.
+  const laidOutNodes = nodes.filter((n) => n.kind !== "topic");
+  const topicNodes = nodes.filter((n) => n.kind === "topic");
+  const nodeIds = new Set(laidOutNodes.map((n) => n.id));
   const request: ElkNode = {
     id: "root",
     layoutOptions: { ...LAYOUT_OPTIONS, "elk.direction": options.direction },
-    children: nodes.map((node) => {
+    children: laidOutNodes.map((node) => {
       const box = boxes.get(node.id)!;
       return { id: node.id, width: box.w, height: box.h };
     }),
@@ -126,6 +193,11 @@ export async function layoutGraph(
       polyline.map((p) => ({ x: p.x - shiftX, y: p.y - shiftY }))
     );
   }
+
+  // Hubs must be placed after member positions are known. Membership links need
+  // no routes: the canvas already falls back to a straight boundary-to-boundary
+  // line for any link ELK did not route, which is exactly what they want.
+  placeTopicHubs(topicNodes, boxes, positions);
 
   // Layer index isn't reported, but every node in a layer shares its position
   // along the flow axis, so counting distinct values recovers the depth.

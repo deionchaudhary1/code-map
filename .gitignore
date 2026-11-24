@@ -3,3 +3,5 @@ dist/
 .frugal-fable/
 web/dist/
 web/node_modules/
+changes/
+plans/
