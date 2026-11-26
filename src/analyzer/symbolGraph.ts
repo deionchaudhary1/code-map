@@ -11,32 +11,12 @@ import {
   type MethodDeclaration,
 } from "ts-morph";
 import type { CallEdge, SymbolGraph, SymbolKind, SymbolNode } from "../types.js";
-import { SOURCE_EXTENSIONS } from "./walk.js";
+import { createModuleResolver } from "./moduleResolver.js";
 
 interface LocalSymbol {
   node: SymbolNode;
   bodyNode: Node;
   className?: string; // set for methods, used to resolve this.method() calls
-}
-
-function resolveModuleTarget(fromDir: string, specifier: string, rootDirAbs: string): string {
-  if (!specifier.startsWith(".") && !path.isAbsolute(specifier)) {
-    // external package - keep the raw specifier as the target namespace
-    return specifier;
-  }
-
-  const basePath = path.resolve(fromDir, specifier);
-  const candidates: string[] = [basePath];
-  for (const ext of SOURCE_EXTENSIONS) candidates.push(basePath + ext);
-  for (const ext of SOURCE_EXTENSIONS) candidates.push(path.join(basePath, "index" + ext));
-
-  for (const candidate of candidates) {
-    if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
-      return path.relative(rootDirAbs, candidate).split(path.sep).join("/");
-    }
-  }
-  // couldn't resolve on disk; fall back to the raw specifier
-  return specifier;
 }
 
 export function buildSymbolGraph(rootDir: string, fileId: string): SymbolGraph {
@@ -139,22 +119,22 @@ export function buildSymbolGraph(rootDir: string, fileId: string): SymbolGraph {
   }
 
   // imported identifier -> resolved target file id (or external module specifier)
-  const importedNameToModule = new Map<string, string>();
-  const fromDir = path.dirname(absoluteFilePath);
+  const importedNameToModule = new Map<string, { module: string; imported: string }>();
+  const resolveModule = createModuleResolver(rootDirAbs);
   for (const importDecl of sourceFile.getImportDeclarations()) {
     const specifier = importDecl.getModuleSpecifierValue();
-    const resolvedSourceFile = importDecl.getModuleSpecifierSourceFile();
-    const moduleTarget = resolvedSourceFile
-      ? path.relative(rootDirAbs, resolvedSourceFile.getFilePath()).split(path.sep).join("/")
-      : resolveModuleTarget(fromDir, specifier, rootDirAbs);
+    const resolved = resolveModule(specifier, absoluteFilePath);
+    const relative = resolved ? path.relative(rootDirAbs, resolved).split(path.sep).join("/") : undefined;
+    const moduleTarget = relative && !relative.startsWith("../") && !relative.split("/").includes("node_modules")
+      ? relative : specifier;
 
     const defaultImport = importDecl.getDefaultImport();
-    if (defaultImport) importedNameToModule.set(defaultImport.getText(), moduleTarget);
+    if (defaultImport) importedNameToModule.set(defaultImport.getText(), { module: moduleTarget, imported: defaultImport.getText() });
     const namespaceImport = importDecl.getNamespaceImport();
-    if (namespaceImport) importedNameToModule.set(namespaceImport.getText(), moduleTarget);
+    if (namespaceImport) importedNameToModule.set(namespaceImport.getText(), { module: moduleTarget, imported: "*" });
     for (const named of importDecl.getNamedImports()) {
       const localName = named.getAliasNode()?.getText() ?? named.getName();
-      importedNameToModule.set(localName, moduleTarget);
+      importedNameToModule.set(localName, { module: moduleTarget, imported: named.getName() });
     }
   }
 
@@ -188,7 +168,7 @@ export function buildSymbolGraph(rootDir: string, fileId: string): SymbolGraph {
 
         const moduleTarget = importedNameToModule.get(name);
         if (moduleTarget) {
-          addEdge(callerId, `${moduleTarget}#${name}`, true);
+          addEdge(callerId, `${moduleTarget.module}#${moduleTarget.imported}`, true);
         }
         continue;
       }
@@ -210,7 +190,7 @@ export function buildSymbolGraph(rootDir: string, fileId: string): SymbolGraph {
           const objectName = objectExpr.getText();
           const moduleTarget = importedNameToModule.get(objectName);
           if (moduleTarget) {
-            addEdge(callerId, `${moduleTarget}#${propertyName}`, true);
+            addEdge(callerId, `${moduleTarget.module}#${propertyName}`, true);
           }
         }
       }

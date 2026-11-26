@@ -21,7 +21,7 @@ interface V8Script {
   functions: V8Function[];
 }
 
-/** Per-function totals keyed by "<absolute file>::<startOffset>". */
+/** Per-function totals keyed by file, name, and the complete root range. */
 interface FunctionHit {
   file: string;
   name: string;
@@ -58,7 +58,9 @@ function readMergedCoverage(coverageDir: string, rootDir: string): {
     return { hits, files };
   }
 
-  const rootPrefix = path.resolve(rootDir) + path.sep;
+  const rootAbs = path.resolve(rootDir);
+  const rootPrefix = rootAbs + path.sep;
+  const realRootPrefix = fs.realpathSync(rootAbs) + path.sep;
 
   for (const entry of entries) {
     let parsed: { result?: V8Script[] };
@@ -78,6 +80,12 @@ function readMergedCoverage(coverageDir: string, rootDir: string): {
         continue;
       }
 
+      // V8 canonicalizes module URLs, while the CLI may have analyzed a
+      // symlinked root (notably /var -> /private/var on macOS).
+      if (realRootPrefix !== rootPrefix && absolute.startsWith(realRootPrefix)) {
+        absolute = path.join(rootAbs, absolute.slice(realRootPrefix.length));
+      }
+
       // Everything outside the analyzed project is noise: node internals,
       // dependencies, and the test runner itself.
       if (!absolute.startsWith(rootPrefix)) continue;
@@ -88,7 +96,9 @@ function readMergedCoverage(coverageDir: string, rootDir: string): {
       for (const fn of script.functions) {
         const range = fn.ranges[0];
         if (!range) continue;
-        const key = `${absolute}::${range.startOffset}`;
+        // A module and its first declaration can both begin at offset zero.
+        // Keeping only that offset merges their counts under the module name.
+        const key = `${absolute}::${fn.functionName}::${range.startOffset}::${range.endOffset}`;
         const existing = hits.get(key);
         if (existing) {
           existing.count += range.count;

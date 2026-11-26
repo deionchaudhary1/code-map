@@ -34,23 +34,51 @@ function runCommand(options: TraceOptions, coverageDir: string): Promise<RunResu
     const child = spawn(options.command, {
       cwd: options.rootDir,
       shell: true,
+      detached: process.platform !== "win32",
       stdio: "inherit", // a test run should still look like a test run
       env: { ...process.env, NODE_V8_COVERAGE: coverageDir },
     });
 
     let timedOut = false;
+    let interrupted: NodeJS.Signals | undefined;
+    const stopCommand = () => {
+      if (process.platform !== "win32" && child.pid !== undefined) {
+        try {
+          // The shell and its descendants share this process group. Killing
+          // only the shell leaves test workers and servers running.
+          process.kill(-child.pid, "SIGKILL");
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code !== "ESRCH") child.kill("SIGKILL");
+        }
+      } else {
+        child.kill("SIGKILL");
+      }
+    };
+    const onInterrupt = () => { interrupted = "SIGINT"; stopCommand(); };
+    const onTerminate = () => { interrupted = "SIGTERM"; stopCommand(); };
+    process.on("SIGINT", onInterrupt);
+    process.on("SIGTERM", onTerminate);
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGKILL");
+      stopCommand();
     }, options.timeoutMs);
 
-    child.on("error", (err) => {
+    const cleanup = () => {
       clearTimeout(timer);
+      process.off("SIGINT", onInterrupt);
+      process.off("SIGTERM", onTerminate);
+    };
+    child.on("error", (err) => {
+      cleanup();
       reject(err);
     });
 
     child.on("close", (exitCode, signal) => {
-      clearTimeout(timer);
+      cleanup();
+      if (interrupted) {
+        reject(Object.assign(new Error(`Trace interrupted by ${interrupted}.`), { code: interrupted }));
+        return;
+      }
       resolve({ exitCode, signal, timedOut, durationMs: Date.now() - started });
     });
   });

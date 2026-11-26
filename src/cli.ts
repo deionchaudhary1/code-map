@@ -134,5 +134,6 @@ program
 
 program.parseAsync().catch((err) => {
   console.error(err instanceof Error ? err.message : err);
-  process.exit(1);
+  const code = (err as NodeJS.ErrnoException)?.code;
+  process.exit(code === "SIGINT" ? 130 : code === "SIGTERM" ? 143 : 1);
 });

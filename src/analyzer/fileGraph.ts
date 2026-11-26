@@ -2,7 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { Project, SyntaxKind, type SourceFile } from "ts-morph";
 import type { FileGraph, FileNode, ImportEdge, RouteDefinition } from "../types.js";
-import { walkSourceFiles, SOURCE_EXTENSIONS, type WalkOptions } from "./walk.js";
+import { walkSourceFiles, type WalkOptions } from "./walk.js";
+import { createModuleResolver } from "./moduleResolver.js";
 import { tarjanSCC } from "./scc.js";
 import { collectRoutes } from "./routes.js";
 import { collectApiCalls, resolveApiCalls } from "./apiCalls.js";
@@ -14,29 +15,6 @@ function toFileId(rootDir: string, absolutePath: string): string {
 function toFolder(fileId: string): string {
   const slashIndex = fileId.indexOf("/");
   return slashIndex === -1 ? "." : fileId.slice(0, slashIndex);
-}
-
-/** Resolves a relative/absolute module specifier against the walked file set. */
-function resolveManually(
-  fromDir: string,
-  specifier: string,
-  walkedSet: Set<string>,
-): string | undefined {
-  if (!specifier.startsWith(".") && !path.isAbsolute(specifier)) return undefined;
-
-  const basePath = path.resolve(fromDir, specifier);
-  const candidates: string[] = [basePath];
-  for (const ext of SOURCE_EXTENSIONS) {
-    candidates.push(basePath + ext);
-  }
-  for (const ext of SOURCE_EXTENSIONS) {
-    candidates.push(path.join(basePath, "index" + ext));
-  }
-
-  for (const candidate of candidates) {
-    if (walkedSet.has(candidate)) return candidate;
-  }
-  return undefined;
 }
 
 function getExportedNames(sourceFile: SourceFile): string[] {
@@ -58,22 +36,19 @@ function collectEdgesForFile(
   sourceFile: SourceFile,
   fileAbsPath: string,
   walkedSet: Set<string>,
+  resolveModule: ReturnType<typeof createModuleResolver>,
 ): RawEdge[] {
   const edges: RawEdge[] = [];
-  const fromDir = path.dirname(fileAbsPath);
 
-  function resolveTarget(specifier: string, resolvedSourceFile: SourceFile | undefined): string | undefined {
-    if (resolvedSourceFile) {
-      const abs = resolvedSourceFile.getFilePath();
-      if (walkedSet.has(abs)) return abs;
-    }
-    return resolveManually(fromDir, specifier, walkedSet);
+  function resolveTarget(specifier: string): string | undefined {
+    const target = resolveModule(specifier, fileAbsPath);
+    return target && walkedSet.has(target) ? target : undefined;
   }
 
   // import declarations
   for (const importDecl of sourceFile.getImportDeclarations()) {
     const specifier = importDecl.getModuleSpecifierValue();
-    const target = resolveTarget(specifier, importDecl.getModuleSpecifierSourceFile());
+    const target = resolveTarget(specifier);
     if (!target) continue;
 
     const importedSymbols: string[] = [];
@@ -89,7 +64,10 @@ function collectEdgesForFile(
       sourceFileAbs: fileAbsPath,
       targetFileAbs: target,
       importedSymbols,
-      isTypeOnly: importDecl.isTypeOnly(),
+      isTypeOnly: importDecl.isTypeOnly() || (
+        !defaultImport && !namespaceImport && importDecl.getNamedImports().length > 0 &&
+        importDecl.getNamedImports().every((named) => named.isTypeOnly())
+      ),
     });
   }
 
@@ -97,7 +75,7 @@ function collectEdgesForFile(
   for (const exportDecl of sourceFile.getExportDeclarations()) {
     const specifier = exportDecl.getModuleSpecifierValue();
     if (!specifier) continue; // local re-export, e.g. `export { x }`
-    const target = resolveTarget(specifier, exportDecl.getModuleSpecifierSourceFile());
+    const target = resolveTarget(specifier);
     if (!target) continue;
 
     const importedSymbols: string[] = [];
@@ -112,7 +90,9 @@ function collectEdgesForFile(
       sourceFileAbs: fileAbsPath,
       targetFileAbs: target,
       importedSymbols,
-      isTypeOnly: exportDecl.isTypeOnly(),
+      isTypeOnly: exportDecl.isTypeOnly() || (
+        namedExports.length > 0 && namedExports.every((named) => named.isTypeOnly())
+      ),
     });
   }
 
@@ -123,7 +103,7 @@ function collectEdgesForFile(
     const [arg] = callExpr.getArguments();
     if (!arg || arg.getKind() !== SyntaxKind.StringLiteral) continue;
     const specifier = arg.getText().slice(1, -1);
-    const target = resolveManually(fromDir, specifier, walkedSet);
+    const target = resolveTarget(specifier);
     if (!target) continue;
 
     edges.push({
@@ -141,6 +121,7 @@ export function buildFileGraph(rootDir: string, options: WalkOptions = {}): File
   const absoluteRoot = path.resolve(rootDir);
   const filePaths = walkSourceFiles(absoluteRoot, options);
   const walkedSet = new Set(filePaths);
+  const resolveModule = createModuleResolver(absoluteRoot);
 
   const project = new Project({
     skipAddingFilesFromTsConfig: true,
@@ -170,6 +151,8 @@ export function buildFileGraph(rootDir: string, options: WalkOptions = {}): File
   for (const filePath of filePaths) {
     const sourceFile = sourceFiles.get(filePath);
     if (!sourceFile) continue;
+    // Config errors should reach the CLI instead of looking like missing edges.
+    resolveModule.validateFile(filePath);
 
     const fileId = toFileId(absoluteRoot, filePath);
     let sizeBytes = 0;
@@ -196,7 +179,7 @@ export function buildFileGraph(rootDir: string, options: WalkOptions = {}): File
     });
 
     try {
-      rawEdges.push(...collectEdgesForFile(sourceFile, filePath, walkedSet));
+      rawEdges.push(...collectEdgesForFile(sourceFile, filePath, walkedSet, resolveModule));
     } catch {
       // if edge collection throws for this file, treat as no edges from it
     }

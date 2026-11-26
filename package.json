@@ -11,6 +11,8 @@
     "web/dist"
   ],
   "scripts": {
+    "test": "node --import tsx --test tests/*.test.ts",
+    "demo": "node dist/cli.js examples/demo --no-ai --run \"node main.mjs\"",
     "build": "tsc -p tsconfig.json && npm run build --prefix web",
     "dev": "tsx src/cli.ts",
     "serve": "tsx src/hostedCli.ts",
