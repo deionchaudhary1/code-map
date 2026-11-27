@@ -1,0 +1,74 @@
+{
+  "name": "code-map",
+  "displayName": "Code Map",
+  "version": "0.1.0",
+  "publisher": "code-map-local",
+  "description": "Explore JavaScript and TypeScript dependencies in an interactive workspace graph.",
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/deionchaudhary1/code-map.git"
+  },
+  "type": "module",
+  "engines": {
+    "vscode": "^1.96.0"
+  },
+  "categories": ["Visualization"],
+  "extensionKind": ["workspace"],
+  "main": "./dist/extension.cjs",
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "Code Map reads workspace source files and resolves their imports."
+    },
+    "virtualWorkspaces": false
+  },
+  "contributes": {
+    "commands": [
+      { "command": "codeMap.open", "title": "Open Code Map" },
+      { "command": "codeMap.refresh", "title": "Refresh", "category": "Code Map" },
+      { "command": "codeMap.chooseWorkspace", "title": "Choose Workspace", "category": "Code Map" }
+    ],
+    "configuration": {
+      "title": "Code Map",
+      "properties": {
+        "codeMap.autoRefresh": {
+          "type": "boolean",
+          "default": true,
+          "scope": "resource",
+          "description": "Refresh the graph when supported source files or project configuration change."
+        },
+        "codeMap.maxFiles": {
+          "type": "integer",
+          "default": 5000,
+          "minimum": 1,
+          "maximum": 20000,
+          "scope": "resource",
+          "description": "Maximum number of source files to analyze in the selected workspace folder."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "npm run build && node --import tsx --test tests/*.test.ts",
+    "test:webview": "npm run build && node scripts/smoke-webview.mjs",
+    "test:integration": "npm run build && node scripts/test-integration.mjs",
+    "vscode:prepublish": "npm run build",
+    "package": "vsce package --skip-license"
+  },
+  "dependencies": {
+    "ignore": "^6.0.2",
+    "ts-morph": "^24.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.0",
+    "@types/vscode": "1.96.0",
+    "@vscode/test-electron": "^3.1.0",
+    "@vscode/vsce": "^4.1.1",
+    "esbuild": "^0.28.2",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.2"
+  }
+}

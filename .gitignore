@@ -5,3 +5,5 @@ web/dist/
 web/node_modules/
 changes/
 plans/
+extension/*.vsix
+.vscode-test/

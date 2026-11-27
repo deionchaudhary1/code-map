@@ -15,6 +15,7 @@ test("resolves relative imports, directory indexes, re-exports and CommonJS depe
     "main.ts->common.cjs", "main.ts->lib/index.ts", "main.ts->other.ts",
   ]);
   assert.deepEqual(graph.nodes.filter((n) => n.isEntryPoint).map((n) => n.id), ["main.ts"]);
+  assert.ok(graph.edges.every((edge) => edge.line === 1));
 });
 
 test("ignores build output, dependencies, declarations, and .gitignore matches", (t) => {
@@ -69,13 +70,16 @@ test("symbol drill-down records local and imported calls", (t) => {
 
 test("connects matching HTTP calls to routes and keeps unmatched or dynamic calls explicit", (t) => {
   const root = fixture(t, {
-    "client.ts": 'fetch(`/api/projects/${id}?view=short`); fetch("/api/projects", { method: "POST" }); fetch(url);',
-    "routes.ts": 'app.get("/api/projects/:id", handler); app.get("/api/projects", handler);',
+    "client.ts": '\nfetch(`/api/projects/${id}?view=short`); fetch("/api/projects", { method: "POST" }); fetch(url);',
+    "routes.ts": '\n\napp.get("/api/projects/:id", handler); app.get("/api/projects", handler);',
   });
   const graph = buildFileGraph(root);
   assert.equal(graph.apiCalls.length, 3);
   assert.equal(graph.routes.length, 2);
   assert.equal(graph.apiCalls[0].target, "routes.ts");
+  assert.equal(graph.apiCalls[0].line, 2);
+  assert.equal(graph.apiCalls[0].targetLine, 3);
+  assert.equal(graph.apiCalls[1].targetLine, undefined);
   assert.equal(graph.apiCalls[1].target, "endpoint::POST /api/projects");
   assert.equal(graph.apiCalls[2].isDynamic, true);
   assert.equal(graph.endpoints.length, 2);

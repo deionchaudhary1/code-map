@@ -8,6 +8,25 @@ The screenshot uses the included synthetic demo. It needs no API keys or model. 
 
 ## Try the demo
 
+### VS Code extension
+
+Code Map also runs in an editor panel with refresh-on-save, source navigation, and active-file following. File creation, renaming, deletion, and project-configuration changes update the graph. Click a file to open it beside the graph; use the inspector to jump to functions, imports, HTTP calls, and matching route registrations.
+
+From this repository root, after installing the root and web dependencies:
+
+```sh
+npm ci --prefix extension
+npm run package:extension
+```
+
+Install `extension/code-map-0.1.0.vsix` through VS Code's **Extensions → … → Install from VSIX…**, then run **Open Code Map** from the Command Palette in a trusted project folder. VS Code Desktop 1.96 or later is required. [Extension setup and development](extension/README.md) · [Marketplace registration and publishing](extension/PUBLISHING.md).
+
+![Code Map extension webview with synthetic data](docs/vscode-extension.png)
+
+The screenshot shows the built webview with synthetic test data. Native editor integration is verified separately in the VS Code Extension Development Host. This version rebuilds the saved graph in a background worker; unsaved-buffer analysis, incremental AST caching, runtime tracing, and AI controls remain outside the extension. The CLI and browser app retain their existing features.
+
+### Standalone browser demo
+
 Use Node.js 22 and npm. From a clone of this repository:
 
 ```sh

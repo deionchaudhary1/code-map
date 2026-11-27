@@ -1,0 +1,389 @@
+:root {
+  color-scheme: light dark;
+  --background: var(--vscode-editor-background, #1e1e1e);
+  --surface: var(--vscode-sideBar-background, #252526);
+  --foreground: var(--vscode-foreground, #cccccc);
+  --muted: var(--vscode-descriptionForeground, #a0a0a0);
+  --border: var(--vscode-panel-border, #454545);
+  --focus: var(--vscode-focusBorder, #007fd4);
+  --error: var(--vscode-errorForeground, #f48771);
+  --graph-background: #14161a;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--vscode-font-family, system-ui, sans-serif);
+  font-size: var(--vscode-font-size, 13px);
+  line-height: 1.45;
+}
+
+body.vscode-light,
+body.vscode-high-contrast-light {
+  color-scheme: light;
+}
+
+body.vscode-dark,
+body.vscode-high-contrast {
+  color-scheme: dark;
+}
+
+h1, h2, h3, h4, p {
+  margin: 0;
+}
+
+button, input, select {
+  min-width: 0;
+  font: inherit;
+}
+
+button {
+  min-height: 26px;
+  padding: 3px 8px;
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: 3px;
+  background: var(--vscode-button-secondaryBackground, #3a3d41);
+  color: var(--vscode-button-secondaryForeground, #ffffff);
+  cursor: pointer;
+}
+
+button:not(:disabled):hover {
+  background: var(--vscode-button-secondaryHoverBackground, #45494e);
+}
+
+:is(button, input, select, .inspector):focus-visible {
+  outline: 1px solid var(--focus);
+  outline-offset: 2px;
+}
+
+:is(button, input, select):disabled {
+  color: var(--vscode-disabledForeground, #858585);
+  cursor: default;
+}
+
+input[type="search"], select {
+  min-height: 26px;
+  padding: 2px 7px;
+  border: 1px solid var(--vscode-input-border, var(--border));
+  border-radius: 3px;
+  background: var(--vscode-input-background, #313131);
+  color: var(--vscode-input-foreground, var(--foreground));
+}
+
+select {
+  background: var(--vscode-dropdown-background, var(--vscode-input-background, #313131));
+  border-color: var(--vscode-dropdown-border, var(--border));
+  color: var(--vscode-dropdown-foreground, var(--vscode-input-foreground, var(--foreground)));
+}
+
+.editor-map {
+  display: grid;
+  grid-template-rows: auto auto auto auto minmax(0, 1fr);
+  height: 100dvh;
+  min-height: 240px;
+}
+
+.map-header {
+  grid-row: 1;
+  display: grid;
+  gap: 9px;
+  padding: 10px 12px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.workspace-row, .control-row, .map-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.workspace-row h1 {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--vscode-sideBarTitle-foreground, var(--foreground));
+  font-size: 1.08em;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.map-counts {
+  color: var(--muted);
+}
+
+.map-actions {
+  margin-inline-start: auto;
+}
+
+.field {
+  display: flex;
+  flex: 1 1 135px;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 260px;
+}
+
+.field :is(input, select) {
+  width: 100%;
+}
+
+.file-field {
+  flex-basis: 160px;
+  max-width: 340px;
+}
+
+.follow-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 1px;
+  cursor: pointer;
+}
+
+.follow-control input {
+  margin: 0;
+  accent-color: var(--vscode-checkbox-selectBackground, var(--focus));
+}
+
+.notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  min-width: 0;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.notice-error,
+.error-text {
+  color: var(--error);
+}
+
+.map-body {
+  grid-row: 5;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(245px, min(34%, 360px));
+  min-height: 0;
+}
+
+.map-pane {
+  position: relative;
+  isolation: isolate;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--graph-background);
+}
+
+.map-pane:only-child {
+  grid-column: 1 / -1;
+}
+
+.canvas-viewport {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.canvas-status,
+.map-pane .center-state {
+  position: absolute;
+  pointer-events: none;
+  overflow-wrap: anywhere;
+}
+
+.canvas-status {
+  top: 10px;
+  left: 10px;
+  max-width: calc(100% - 20px);
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--surface);
+}
+
+.center-state {
+  display: grid;
+  min-height: 130px;
+  padding: 16px;
+  align-content: center;
+  justify-items: center;
+  color: var(--muted);
+  text-align: center;
+}
+
+.map-pane .center-state {
+  inset: 0;
+  color: #b8bdc6;
+}
+
+.inspector {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  background: var(--surface);
+  border-inline-start: 1px solid var(--border);
+}
+
+.inspector:focus-visible {
+  outline-offset: -2px;
+}
+
+.inspector-heading,
+.inspector-title,
+.inspector-section,
+.inspector-idle {
+  padding: 9px 12px;
+}
+
+.inspector-heading {
+  border-bottom: 1px solid var(--border);
+}
+
+.inspector-heading h2,
+.inspector-section h4 {
+  font-size: 1em;
+  font-weight: 650;
+}
+
+.inspector-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: start;
+  gap: 8px 10px;
+}
+
+.inspector-title h3 {
+  flex: 1 1 130px;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 1.04em;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.inspector-section {
+  display: grid;
+  gap: 6px;
+  border-top: 1px solid var(--border);
+}
+
+.inspector-idle, .muted {
+  color: var(--muted);
+}
+
+.inspector-section > button:not(.inspector-button) {
+  justify-self: start;
+}
+
+.source-text,
+.inspector-button-title {
+  font-family: var(--vscode-editor-font-family, monospace);
+  overflow-wrap: anywhere;
+}
+
+.inspector-list {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.inspector-button {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: 4px 6px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--foreground);
+  text-align: start;
+}
+
+.inspector-button:not(:disabled):hover {
+  background: var(--vscode-list-hoverBackground, #303033);
+  color: var(--vscode-list-hoverForeground, var(--foreground));
+}
+
+.inspector-button-detail {
+  color: var(--muted);
+  font-size: 0.92em;
+  overflow-wrap: anywhere;
+}
+
+.inspector-button:hover .inspector-button-detail {
+  color: inherit;
+}
+
+/* The dependency packages inject these rules by default. The webview links
+   them here so its content security policy can require external styles. */
+.force-graph-container canvas {
+  display: block;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.force-graph-container .clickable {
+  cursor: pointer;
+}
+
+.force-graph-container .grabbable {
+  cursor: grab;
+}
+
+.force-graph-container .grabbable:active {
+  cursor: grabbing;
+}
+
+.float-tooltip-kap {
+  position: absolute;
+  width: max-content;
+  max-width: max(50%, 150px);
+  padding: 3px 5px;
+  border-radius: 3px;
+  background: var(--vscode-editorHoverWidget-background, #252526);
+  color: var(--vscode-editorHoverWidget-foreground, #cccccc);
+  pointer-events: none;
+}
+
+@media (max-width: 620px) {
+  .map-body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(130px, 1fr) minmax(105px, 0.75fr);
+  }
+
+  .map-pane:only-child {
+    grid-row: 1 / -1;
+  }
+
+  .inspector {
+    border-inline-start: 0;
+    border-top: 1px solid var(--border);
+  }
+}
+
+@media (max-width: 390px) {
+  .map-actions {
+    flex-basis: 100%;
+    margin-inline-start: 0;
+  }
+
+  .field {
+    flex-basis: 100%;
+    max-width: none;
+  }
+}

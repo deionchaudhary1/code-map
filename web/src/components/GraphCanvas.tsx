@@ -17,6 +17,9 @@ interface GraphCanvasProps {
   layout: LayoutResult;
   width: number;
   height: number;
+  /** Fit after each layout update. Disable to fit once and then on demand. */
+  autoFit?: boolean;
+  fitVersion?: number;
   search: string;
   selectedId: string | null;
   selectedLinkId: string | null;
@@ -35,6 +38,7 @@ type PositionedNode = GraphNode & { x: number; y: number };
 
 const CORNER_RADIUS = 2.5;
 const ARROW_LENGTH = 4;
+const NODE_REL_SIZE = 4;
 const DEFAULT_BOX: NodeBox = {
   w: 24,
   h: 10,
@@ -168,6 +172,8 @@ export default function GraphCanvas({
   layout,
   width,
   height,
+  autoFit = true,
+  fitVersion = 0,
   search,
   selectedId,
   selectedLinkId,
@@ -180,7 +186,14 @@ export default function GraphCanvas({
   topicIndex,
 }: GraphCanvasProps) {
   const fgRef = useRef<any>(null);
+  const lastFitVersion = useRef<number | null>(null);
   const { positions, routes, boxes } = layout;
+  const fitNodeValue = useMemo(() => (node: NodeObject<GraphNode>) => {
+    const box = boxes.get(String(node.id)) ?? DEFAULT_BOX;
+    // zoomToFit uses circular node bounds. Include the drawn box's width and
+    // height so a small graph can fit without clipping its outermost labels.
+    return (Math.max(box.w, box.h) / (2 * NODE_REL_SIZE)) ** 2;
+  }, [boxes]);
 
   // A layout is always one render behind a filter change, so drop anything it
   // hasn't placed yet rather than drawing it at the origin.
@@ -202,11 +215,16 @@ export default function GraphCanvas({
   useEffect(() => {
     const fg = fgRef.current;
     if (!fg || graphData.nodes.length === 0) return;
+    if (!autoFit && lastFitVersion.current === fitVersion) return;
     // Positions are final as soon as they arrive, but zoomToFit reads them off
     // the rendered graph — so it has to run after this commit paints.
-    const timer = setTimeout(() => fg.zoomToFit(400, 40), 0);
+    const timer = setTimeout(() => {
+      lastFitVersion.current = fitVersion;
+      const duration = !autoFit && window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 400;
+      fg.zoomToFit(duration, 40);
+    }, 0);
     return () => clearTimeout(timer);
-  }, [graphData]);
+  }, [autoFit, fitVersion, graphData]);
 
   const searchLower = search.trim().toLowerCase();
   const hasFocus = selectedId !== null || selectedLinkId !== null || searchLower.length > 0;
@@ -283,7 +301,8 @@ export default function GraphCanvas({
       width={width}
       height={height}
       backgroundColor="#14161a"
-      nodeRelSize={4}
+      nodeRelSize={NODE_REL_SIZE}
+      {...(!autoFit && { nodeVal: fitNodeValue })}
       // Layout is precomputed; dragging a node would strand its orthogonal
       // routes at the old position.
       enableNodeDrag={false}

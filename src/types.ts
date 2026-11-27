@@ -19,6 +19,8 @@ export interface ImportEdge {
   source: string;
   /** FileNode.id of the imported file */
   target: string;
+  /** 1-indexed line of the import/export/require declaration, when known. */
+  line?: number;
   importedSymbols: string[];
   /** TS `import type` only */
   isTypeOnly: boolean;
@@ -47,6 +49,8 @@ export interface ApiCallEdge {
    * found; otherwise the id of the synthetic EndpointNode this call points at.
    */
   target: string;
+  /** 1-indexed line of the matching route registration, when resolved. */
+  targetLine?: number;
 }
 
 /** A synthetic node for an HTTP endpoint that no in-repo route handler matched. */

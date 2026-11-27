@@ -1,0 +1,12 @@
+.vscodeignore
+.vscode/**
+.vscode-test/**
+src/**
+tests/**
+scripts/**
+dist/tests/**
+package-lock.json
+tsconfig.json
+PUBLISHING.md
+**/*.map
+**/*.vsix

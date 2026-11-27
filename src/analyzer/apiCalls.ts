@@ -181,6 +181,7 @@ export function resolveApiCalls(
 
   for (const call of detected) {
     let target: string | undefined;
+    let targetLine: number | undefined;
 
     if (!call.isDynamic) {
       const match = routes.find(
@@ -188,7 +189,10 @@ export function resolveApiCalls(
           (route.method === call.method || route.method === "unknown" || call.method === "unknown") &&
           routeMatchesUrl(route.path, call.url),
       );
-      if (match) target = match.file;
+      if (match) {
+        target = match.file;
+        targetLine = match.line;
+      }
     }
 
     if (!target) {
@@ -208,6 +212,7 @@ export function resolveApiCalls(
       client: call.client,
       line: call.line,
       target,
+      ...(targetLine !== undefined ? { targetLine } : {}),
     });
   }
 

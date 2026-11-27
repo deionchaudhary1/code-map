@@ -30,6 +30,7 @@ interface RawEdge {
   targetFileAbs: string;
   importedSymbols: string[];
   isTypeOnly: boolean;
+  line: number;
 }
 
 function collectEdgesForFile(
@@ -63,6 +64,7 @@ function collectEdgesForFile(
     edges.push({
       sourceFileAbs: fileAbsPath,
       targetFileAbs: target,
+      line: importDecl.getStartLineNumber(),
       importedSymbols,
       isTypeOnly: importDecl.isTypeOnly() || (
         !defaultImport && !namespaceImport && importDecl.getNamedImports().length > 0 &&
@@ -89,6 +91,7 @@ function collectEdgesForFile(
     edges.push({
       sourceFileAbs: fileAbsPath,
       targetFileAbs: target,
+      line: exportDecl.getStartLineNumber(),
       importedSymbols,
       isTypeOnly: exportDecl.isTypeOnly() || (
         namedExports.length > 0 && namedExports.every((named) => named.isTypeOnly())
@@ -109,6 +112,7 @@ function collectEdgesForFile(
     edges.push({
       sourceFileAbs: fileAbsPath,
       targetFileAbs: target,
+      line: callExpr.getStartLineNumber(),
       importedSymbols: ["*"],
       isTypeOnly: false,
     });
@@ -202,6 +206,7 @@ export function buildFileGraph(rootDir: string, options: WalkOptions = {}): File
   const edges: ImportEdge[] = rawEdges.map((raw) => ({
     source: toFileId(absoluteRoot, raw.sourceFileAbs),
     target: toFileId(absoluteRoot, raw.targetFileAbs),
+    line: raw.line,
     importedSymbols: raw.importedSymbols,
     isTypeOnly: raw.isTypeOnly,
     inCycle: false,
